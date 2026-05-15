@@ -7,6 +7,7 @@ tests can assert which model the agent loop resolved.
 
 
 from employee_agent.llm import Response, ToolCall
+from employee_agent.web import SearchResult
 
 
 class FakeLLMClient:
@@ -31,6 +32,26 @@ class FakeLLMClient:
         if isinstance(reply, list):
             return Response(tool_calls=list(reply))
         return Response(text=reply)
+
+
+class FakeWebClient:
+    """Deterministic WebClient double. `results` maps a query to canned
+    SearchResults; `pages` maps a URL to canned page text. Records every
+    search/fetch so tests can assert routing without touching the network."""
+
+    def __init__(self, results=None, pages=None):
+        self._results = results or {}
+        self._pages = pages or {}
+        self.searched = []
+        self.fetched = []
+
+    def search(self, query):
+        self.searched.append(query)
+        return [SearchResult(*r) for r in self._results.get(query, [])]
+
+    def fetch(self, url):
+        self.fetched.append(url)
+        return self._pages.get(url, "")
 
 
 class TopicEmbedder:

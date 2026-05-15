@@ -16,6 +16,7 @@ from .llm import AnthropicLLMClient
 from .recall import Recall
 from .store import Store
 from .tui import ChatApp
+from .web import AnthropicWebClient
 
 
 def main() -> None:
@@ -25,7 +26,11 @@ def main() -> None:
     store = Store(db_path)
     recall = Recall(store, FastEmbedEmbedder(), Config())
     agent = Agent(
-        llm=AnthropicLLMClient(), store=store, config=Config(), recall=recall
+        llm=AnthropicLLMClient(),
+        store=store,
+        config=Config(),
+        recall=recall,
+        web=AnthropicWebClient(),
     )
     ChatApp(agent).run()
     agent.seal()

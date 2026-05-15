@@ -15,10 +15,12 @@ import json
 
 from .recall import Unit
 from .summarizer import Summarizer
+from .tools import ReadOnlyTools
 
-# Read-only recall surface. Other read-only tools (file/web) hang off this
-# same surface in a later issue — adding them is purely additive here.
-TOOL_SCHEMAS = [
+# The agent-pulled recall surface (PRD Q8). The band-B read-only local tools
+# (file/web/clock) hang off the same loop via ReadOnlyTools — adding them is
+# purely additive: the recall schemas below are unchanged.
+RECALL_SCHEMAS = [
     {
         "name": "search_recall",
         "description": (
@@ -52,11 +54,12 @@ _MAX_TOOL_STEPS = 8  # bound the loop — runaway tool use is a cost hazard
 
 
 class Agent:
-    def __init__(self, llm, store, config, recall):
+    def __init__(self, llm, store, config, recall, web=None):
         self._llm = llm
         self._store = store
         self._config = config
         self._recall = recall
+        self._tools = ReadOnlyTools(web)
         self._summarizer = Summarizer(llm, config)
         self.conversation_id = store.start_conversation()
         self._next_seq = 0
@@ -66,10 +69,11 @@ class Agent:
         self._next_seq += 1
 
         model = self._config.model_for("agent_loop")
+        tools = RECALL_SCHEMAS + self._tools.SCHEMAS
         messages = [{"role": "user", "content": user_input}]
         reply = ""
         for _ in range(_MAX_TOOL_STEPS):
-            resp = self._llm.complete(messages, model, tools=TOOL_SCHEMAS)
+            resp = self._llm.complete(messages, model, tools=tools)
             if not resp.tool_calls:
                 reply = resp.text or ""
                 break
@@ -138,7 +142,7 @@ class Agent:
             return json.dumps(
                 [{"role": t.role, "content": t.content} for t in turns]
             )
-        return f"unknown tool: {name}"
+        return self._tools.run(name, tool_input)
 
     def seal(self) -> None:
         """Seal the Conversation: write the final whole-Conversation Summary,
