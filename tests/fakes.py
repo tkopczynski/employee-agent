@@ -33,15 +33,31 @@ class FakeLLMClient:
         return Response(text=reply)
 
 
-class FakeEmbedder:
-    """Deterministic Embedder placeholder. Keyword Recall does not embed, so
-    this just satisfies the seam; the same text always maps to the same
-    vector so a later semantic-recall issue can rely on determinism."""
+class TopicEmbedder:
+    """Deterministic, controllable Embedder for tests (Issue 04).
 
-    def __init__(self, dim=384):
+    Texts are grouped into named topics; same-topic texts embed to the same
+    orthogonal basis vector (semantically identical), different topics are
+    orthogonal (maximally far), and any unregistered text embeds to one shared
+    "unknown" vector orthogonal to every topic. Tests dictate which phrases are
+    semantically close and assert ordering/recall — never raw vectors (PRD
+    Testing Decisions). With no topics it is an inert constant embedder: the
+    semantic arm contributes uniformly so keyword ranking dominates and
+    keyword-only tests stay deterministic.
+    """
+
+    def __init__(self, topics=None, dim=384):
         self._dim = dim
+        self._axis_of = {}
+        for axis, texts in enumerate((topics or {}).values()):
+            for text in texts:
+                self._axis_of[text] = axis
+        self._unknown_axis = len(topics or {})
 
     def embed(self, texts):
-        return [
-            [float((hash(t) >> i) & 1) for i in range(self._dim)] for t in texts
-        ]
+        out = []
+        for text in texts:
+            vec = [0.0] * self._dim
+            vec[self._axis_of.get(text, self._unknown_axis)] = 1.0
+            out.append(vec)
+        return out

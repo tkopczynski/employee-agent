@@ -14,7 +14,7 @@ from employee_agent.llm import ToolCall
 from employee_agent.recall import Recall
 from employee_agent.store import Store
 
-from fakes import FakeEmbedder, FakeLLMClient
+from fakes import TopicEmbedder, FakeLLMClient
 
 _SUMMARY = json.dumps(
     {
@@ -37,7 +37,7 @@ def _sealed_session(store, recall):
 
 def test_seal_indexes_user_turns_requests_and_summary_not_agent_turns(tmp_path):
     store = Store(tmp_path / "recall.sqlite")
-    recall = Recall(store, FakeEmbedder(), Config())
+    recall = Recall(store, TopicEmbedder(), Config())
 
     past_id = _sealed_session(store, recall)
 
@@ -49,14 +49,24 @@ def test_seal_indexes_user_turns_requests_and_summary_not_agent_turns(tmp_path):
     ].conversation_id == past_id
     # The Summary is recallable.
     assert recall.search("agreed", k=6)[0].conversation_id == past_id
-    # The Agent Turn is NOT indexed — "drafted" appears only in the Agent's
-    # reply, nowhere in the User Turn / Request / Summary.
-    assert recall.search("drafted", k=6) == []
+    # The Agent Turn is NOT an indexed unit (only User Turns + Requests + the
+    # Summary are — _units_for / ADR-0006). Hybrid recall now surfaces related
+    # units for any query (semantic arm), so we no longer assert emptiness;
+    # instead the Agent's reply text must never appear as a hit snippet,
+    # whatever we search for.
+    agent_reply = "Sure, I'll get that drafted."
+    snippets = [
+        h.snippet
+        for q in ("please prepare", "drafted", "Q1 revenue", "agreed", "report")
+        for h in recall.search(q, k=6)
+    ]
+    assert snippets  # hybrid recall does surface related units
+    assert agent_reply not in snippets
 
 
 def test_fresh_launch_recalls_a_prior_sealed_conversation_with_its_date(tmp_path):
     store = Store(tmp_path / "recall.sqlite")
-    recall = Recall(store, FakeEmbedder(), Config())
+    recall = Recall(store, TopicEmbedder(), Config())
 
     past_id = _sealed_session(store, recall)
     past_date = store.get_conversation(past_id).started_at[:10]
@@ -95,7 +105,7 @@ def _tool_result(messages):
 
 def test_search_recall_result_frames_hits_as_dated_past_sessions(tmp_path):
     store = Store(tmp_path / "recall.sqlite")
-    recall = Recall(store, FakeEmbedder(), Config())
+    recall = Recall(store, TopicEmbedder(), Config())
     past_id = _sealed_session(store, recall)
     past_date = store.get_conversation(past_id).started_at[:10]
 

@@ -14,7 +14,7 @@ from employee_agent.llm import ToolCall
 from employee_agent.recall import Recall, Unit
 from employee_agent.store import Store
 
-from fakes import FakeEmbedder, FakeLLMClient
+from fakes import TopicEmbedder, FakeLLMClient
 
 
 def _seed_past_conversation(store, recall):
@@ -30,7 +30,7 @@ def _seed_past_conversation(store, recall):
 
 def test_agent_offers_recall_tools_and_executes_a_tool_call(tmp_path):
     store = Store(tmp_path / "recall.sqlite")
-    recall = Recall(store, FakeEmbedder(), Config())
+    recall = Recall(store, TopicEmbedder(), Config())
     past_id = _seed_past_conversation(store, recall)
 
     llm = FakeLLMClient(

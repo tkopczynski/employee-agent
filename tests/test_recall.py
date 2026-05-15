@@ -1,7 +1,7 @@
 """Recall — the searchable store of Sealed Conversations (CONTEXT.md).
 
 Exercised through Recall's public interface against a temporary SQLite file
-with real FTS5 and a deterministic FakeEmbedder. We assert observable
+with real FTS5 and a deterministic TopicEmbedder. We assert observable
 contracts (what search returns for a known corpus, the seal-gate), never SQL,
 vectors, or private state (PRD Testing Decisions).
 """
@@ -10,12 +10,12 @@ from employee_agent.config import Config
 from employee_agent.recall import Recall, Unit
 from employee_agent.store import Store
 
-from fakes import FakeEmbedder
+from fakes import TopicEmbedder
 
 
 def _recall(tmp_path):
     store = Store(tmp_path / "recall.sqlite")
-    return Recall(store, FakeEmbedder(), Config()), store
+    return Recall(store, TopicEmbedder(), Config()), store
 
 
 def test_keyword_finds_a_sealed_conversations_user_turn(tmp_path):

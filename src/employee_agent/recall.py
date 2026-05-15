@@ -7,8 +7,11 @@ seal-gate is a live SQL join onto `conversations.sealed_at`, so only Sealed
 (past-session) Conversations are searchable (ADR-0005) and incremental
 indexing during a session (a later issue) stays additive.
 
-Semantic search (sqlite-vec) and RRF arrive in a later issue; the Embedder
-seam is wired now so that is purely additive.
+Retrieval is hybrid: an FTS5 keyword arm and a sqlite-vec semantic arm
+(units embedded locally via the Embedder seam, ADR-0002), fused by Reciprocal
+Rank Fusion (no score normalisation or weight tuning), then bounded by a
+top-K + token-ceiling budget. Both arms are seal-gated, so semantic recall
+obeys ADR-0005 exactly like keyword.
 """
 
 import datetime as dt
@@ -16,9 +19,19 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 
+import sqlite_vec
+
 
 def _now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def _est_tokens(text: str | None) -> int:
+    """Deterministic, dependency-free token estimate (~4 chars/token). Used
+    only to size the result budget — we never ship a tokenizer for that."""
+    if not text:
+        return 0
+    return -(-len(text) // 4)  # ceil division
 
 
 @dataclass(frozen=True)
@@ -50,6 +63,9 @@ class Recall:
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(store.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._conn.enable_load_extension(True)
+        sqlite_vec.load(self._conn)
+        self._conn.enable_load_extension(False)
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS search_units (
@@ -65,11 +81,22 @@ class Recall:
         self._conn.execute(
             "CREATE VIRTUAL TABLE IF NOT EXISTS fts_search_units USING fts5(text)"
         )
+        # Semantic index (ADR-0002): rowid mirrors search_units.id, 384-dim
+        # to match bge-small-en-v1.5.
+        self._conn.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS vec_search_units "
+            "USING vec0(embedding float[384])"
+        )
         self._conn.commit()
 
     def add_units(self, units: list[Unit]) -> None:
+        if not units:
+            return
+        # One batched local embed call (ADR-0002) — offline by construction;
+        # the keyword + vector rows share the unit's rowid in one transaction.
+        vectors = self._embedder.embed([u.text for u in units])
         with self._lock:
-            for unit in units:
+            for unit, vec in zip(units, vectors):
                 cur = self._conn.execute(
                     "INSERT INTO search_units "
                     "(conversation_id, kind, source_turn_id, text, created_at) "
@@ -86,20 +113,29 @@ class Recall:
                     "INSERT INTO fts_search_units (rowid, text) VALUES (?, ?)",
                     (cur.lastrowid, unit.text),
                 )
+                self._conn.execute(
+                    "INSERT INTO vec_search_units (rowid, embedding) "
+                    "VALUES (?, ?)",
+                    (cur.lastrowid, sqlite_vec.serialize_float32(vec)),
+                )
             self._conn.commit()
 
-    def search(self, query: str, k: int) -> list[Hit]:
-        # Seal-gate: the join onto conversations + `sealed_at IS NOT NULL`
-        # means only Sealed (past-session) Conversations are searchable.
+    def search(self, query: str, k: int | None = None) -> list[Hit]:
+        """Hybrid recall: fuse the keyword and semantic rankings with RRF,
+        fold to one Hit per Conversation, then apply the result budget. Both
+        arms are seal-gated, so only Sealed (past-session) Conversations are
+        searchable (ADR-0005). `k` falls back to the configured default."""
+        if k is None:
+            k = self._config.recall_k
+        query_vec = self._embedder.embed([query])[0]
         with self._lock:
-            # bm25() is only valid directly against the FTS table (not inside
-            # a grouped subquery), so rank units best-first in SQL, then fold
-            # to one Hit per Conversation in Python: the first row seen for a
-            # Conversation is its best-matching unit (the snippet), and
-            # Conversations surface in best-unit order. k caps Conversations.
-            rows = self._conn.execute(
+            n = self._conn.execute(
+                "SELECT count(*) FROM search_units"
+            ).fetchone()[0]
+            keyword_rows = self._conn.execute(
                 """
-                SELECT su.conversation_id, c.started_at, c.summary_prose, su.text
+                SELECT su.id, su.conversation_id, c.started_at,
+                       c.summary_prose, su.text
                 FROM fts_search_units
                 JOIN search_units su ON su.id = fts_search_units.rowid
                 JOIN conversations c ON c.id = su.conversation_id
@@ -108,22 +144,68 @@ class Recall:
                 """,
                 (query,),
             ).fetchall()
-        hits: list[Hit] = []
-        seen: set[int] = set()
-        for r in rows:
-            cid = r["conversation_id"]
-            if cid in seen:
-                continue
-            seen.add(cid)
-            hits.append(
-                Hit(
-                    conversation_id=cid,
-                    date=r["started_at"][:10],
-                    summary_line=r["summary_prose"],
-                    snippet=r["text"],
+            # KNN must be a bare vec0 query, so rank all units by distance in a
+            # CTE, then seal-gate via the join outside it.
+            semantic_rows = self._conn.execute(
+                """
+                WITH knn AS (
+                    SELECT rowid AS id, distance
+                    FROM vec_search_units
+                    WHERE embedding MATCH ? ORDER BY distance LIMIT ?
                 )
+                SELECT su.id, su.conversation_id, c.started_at,
+                       c.summary_prose, su.text
+                FROM knn
+                JOIN search_units su ON su.id = knn.id
+                JOIN conversations c ON c.id = su.conversation_id
+                WHERE c.sealed_at IS NOT NULL
+                ORDER BY knn.distance
+                """,
+                (sqlite_vec.serialize_float32(query_vec), max(n, 1)),
+            ).fetchall()
+        return self._fuse(keyword_rows, semantic_rows, k)
+
+    def _fuse(self, keyword_rows, semantic_rows, k: int) -> list[Hit]:
+        # Reciprocal Rank Fusion: a unit at 1-based rank r in a list scores
+        # 1/(rrf_k + r) for that list; its fused score is the sum across the
+        # lists it appears in. No normalisation, no per-arm weighting — a unit
+        # ranked in *both* lists beats one ranked top in only one.
+        rrf_k = self._config.rrf_k
+        scores: dict[int, float] = {}
+        meta: dict[int, sqlite3.Row] = {}
+        for rows in (keyword_rows, semantic_rows):
+            for rank, r in enumerate(rows, 1):
+                uid = r["id"]
+                scores[uid] = scores.get(uid, 0.0) + 1.0 / (rrf_k + rank)
+                meta.setdefault(uid, r)
+        # Fold to one Hit per Conversation: its best (max-RRF) unit is the
+        # snippet and sets the Conversation's rank.
+        best: dict[int, tuple[float, sqlite3.Row]] = {}
+        for uid, score in scores.items():
+            r = meta[uid]
+            cid = r["conversation_id"]
+            if cid not in best or score > best[cid][0]:
+                best[cid] = (score, r)
+        # Deterministic order: score desc, then conversation_id asc.
+        ranked = sorted(best.items(), key=lambda kv: (-kv[1][0], kv[0]))
+        ceiling = self._config.recall_token_ceiling
+        hits: list[Hit] = []
+        used = 0
+        for cid, (_score, r) in ranked:
+            hit = Hit(
+                conversation_id=cid,
+                date=r["started_at"][:10],
+                summary_line=r["summary_prose"],
+                snippet=r["text"],
             )
-            if len(hits) == k:
+            cost = _est_tokens(hit.summary_line) + _est_tokens(hit.snippet)
+            # Fewer complete hits over more truncated ones (PRD): stop before
+            # exceeding the ceiling, but always return the top hit.
+            if hits and used + cost > ceiling:
+                break
+            hits.append(hit)
+            used += cost
+            if len(hits) >= k:
                 break
         return hits
 

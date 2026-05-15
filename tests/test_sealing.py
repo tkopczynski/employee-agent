@@ -13,13 +13,13 @@ from employee_agent.config import Config
 from employee_agent.recall import Recall
 from employee_agent.store import Store
 
-from fakes import FakeEmbedder, FakeLLMClient
+from fakes import TopicEmbedder, FakeLLMClient
 
 
 def _make(tmp_path, summary_payload):
     store = Store(tmp_path / "recall.sqlite")
     llm = FakeLLMClient(replies=["Drafting the Q1 report now.", json.dumps(summary_payload)])
-    recall = Recall(store, FakeEmbedder(), Config())
+    recall = Recall(store, TopicEmbedder(), Config())
     agent = Agent(llm=llm, store=store, config=Config(), recall=recall)
     return agent, store, llm
 

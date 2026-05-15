@@ -105,8 +105,10 @@ class Agent:
 
     def _run_tool(self, name: str, tool_input: dict) -> str:
         if name == "search_recall":
+            # k falls through to the configured default (PRD: K is config,
+            # not hardcoded) unless the model asked for a specific size.
             hits = self._recall.search(
-                tool_input["query"], tool_input.get("k", 6)
+                tool_input["query"], tool_input.get("k")
             )
             # Recall is seal-scoped (ADR-0005): every hit is necessarily a
             # PAST, finished session, never the current one. Frame it that

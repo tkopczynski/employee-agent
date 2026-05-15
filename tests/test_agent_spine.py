@@ -6,14 +6,14 @@ from employee_agent.config import Config
 from employee_agent.recall import Recall
 from employee_agent.store import Store
 
-from fakes import FakeEmbedder, FakeLLMClient
+from fakes import TopicEmbedder, FakeLLMClient
 
 
 def make_agent(tmp_path, replies=None, config=None):
     cfg = config or Config()
     store = Store(tmp_path / "recall.sqlite")
     llm = FakeLLMClient(replies or [])
-    recall = Recall(store, FakeEmbedder(), cfg)
+    recall = Recall(store, TopicEmbedder(), cfg)
     agent = Agent(llm=llm, store=store, config=cfg, recall=recall)
     return agent, store, llm
 
