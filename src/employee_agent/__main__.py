@@ -1,8 +1,9 @@
 """Entrypoint: one launch == one new Conversation (ADR-0005).
 
 Wires Config + Store + the real LLM adapter into the Agent, then hands it to
-the TUI. Exiting the TUI ends the process and thus the Conversation; deterministic
-Sealing on exit arrives with a later issue.
+the TUI. `App.run()` returns when the TUI exits, so Sealing here is
+deterministic: the finished Conversation is always Sealed before the process
+ends. Thin glue — the Sealing behaviour itself lives in `Agent.seal()`.
 """
 
 import os
@@ -22,6 +23,7 @@ def main() -> None:
     store = Store(db_path)
     agent = Agent(llm=AnthropicLLMClient(), store=store, config=Config())
     ChatApp(agent).run()
+    agent.seal()
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ deliberately out of scope here — they arrive with later issues.
 """
 
 import datetime as dt
+import json
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -21,6 +22,8 @@ class Conversation:
     id: int
     started_at: str
     sealed_at: str | None
+    summary_prose: str | None = None
+    summary_outcomes: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -75,15 +78,19 @@ class Store:
     def get_conversation(self, conversation_id: int) -> Conversation | None:
         with self._lock:
             row = self._conn.execute(
-                "SELECT id, started_at, sealed_at FROM conversations WHERE id = ?",
+                "SELECT id, started_at, sealed_at, summary_prose, summary_outcomes "
+                "FROM conversations WHERE id = ?",
                 (conversation_id,),
             ).fetchone()
         if row is None:
             return None
+        outcomes = row["summary_outcomes"]
         return Conversation(
             id=row["id"],
             started_at=row["started_at"],
             sealed_at=row["sealed_at"],
+            summary_prose=row["summary_prose"],
+            summary_outcomes=json.loads(outcomes) if outcomes is not None else None,
         )
 
     def add_turn(self, conversation_id: int, seq: int, role: str, content: str) -> None:
@@ -92,6 +99,22 @@ class Store:
                 "INSERT INTO turns (conversation_id, seq, role, content, created_at) "
                 "VALUES (?, ?, ?, ?, ?)",
                 (conversation_id, seq, role, content, _now_iso()),
+            )
+            self._conn.commit()
+
+    def seal_conversation(
+        self, conversation_id: int, prose: str, outcomes: list[str]
+    ) -> None:
+        # Sealing closes the Conversation: stamp sealed_at and persist the
+        # final structured Summary. outcomes is stored as JSON TEXT so the
+        # row stays human-inspectable (ADR-0001). Requests are not on the
+        # Conversation row — they belong to Recall's units (later issue).
+        with self._lock:
+            self._conn.execute(
+                "UPDATE conversations "
+                "SET sealed_at = ?, summary_prose = ?, summary_outcomes = ? "
+                "WHERE id = ? AND sealed_at IS NULL",
+                (_now_iso(), prose, json.dumps(outcomes), conversation_id),
             )
             self._conn.commit()
 
