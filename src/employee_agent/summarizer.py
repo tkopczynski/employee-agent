@@ -43,7 +43,7 @@ class Summarizer:
         reply = self._llm.complete(
             [{"role": "user", "content": _PROMPT.format(transcript=transcript)}],
             self._config.model_for("summarise"),
-        )
+        ).text or ""
         try:
             data = json.loads(reply)
             return Summary(

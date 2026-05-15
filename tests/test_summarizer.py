@@ -40,7 +40,7 @@ def test_summarize_uses_the_summarise_model_not_the_agent_loop_model():
 
     llm = FakeLLMClient(replies=[reply])
     Summarizer(llm=llm, config=Config()).summarize(_turns())
-    _, model_used = llm.calls[-1]
+    _, model_used, _ = llm.calls[-1]
     assert model_used == "claude-haiku-4-5"  # default `summarise` model, not agent_loop
 
     # Overriding only the summarise entry changes the model — proves it is
@@ -48,7 +48,7 @@ def test_summarize_uses_the_summarise_model_not_the_agent_loop_model():
     llm2 = FakeLLMClient(replies=[reply])
     cfg = Config(models={"summarise": "claude-haiku-4-5-cheap"})
     Summarizer(llm=llm2, config=cfg).summarize(_turns())
-    _, model_used2 = llm2.calls[-1]
+    _, model_used2, _ = llm2.calls[-1]
     assert model_used2 == "claude-haiku-4-5-cheap"
 
 

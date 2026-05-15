@@ -38,8 +38,11 @@ class Store:
     def __init__(self, db_path):
         # The TUI runs the agent loop on a Textual worker thread, so the
         # connection is shared across threads; access is serialised by _lock.
+        # db_path is public so Recall can open the same single SQLite file
+        # (ADR-0001) for the search tables it owns.
+        self.db_path = str(db_path)
         self._lock = threading.Lock()
-        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute(
             """

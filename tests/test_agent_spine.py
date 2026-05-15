@@ -3,15 +3,18 @@ import threading
 
 from employee_agent.agent import Agent
 from employee_agent.config import Config
+from employee_agent.recall import Recall
 from employee_agent.store import Store
 
-from fakes import FakeLLMClient
+from fakes import FakeEmbedder, FakeLLMClient
 
 
 def make_agent(tmp_path, replies=None, config=None):
+    cfg = config or Config()
     store = Store(tmp_path / "recall.sqlite")
     llm = FakeLLMClient(replies or [])
-    agent = Agent(llm=llm, store=store, config=config or Config())
+    recall = Recall(store, FakeEmbedder(), cfg)
+    agent = Agent(llm=llm, store=store, config=cfg, recall=recall)
     return agent, store, llm
 
 
@@ -67,14 +70,14 @@ def test_multiple_exchanges_keep_a_single_monotonic_sequence(tmp_path):
 def test_agent_loop_model_is_resolved_from_the_per_task_map(tmp_path):
     agent, _, llm = make_agent(tmp_path, replies=["ok"])
     agent.send("hi")
-    _, model_used = llm.calls[-1]
+    _, model_used, _ = llm.calls[-1]
     assert model_used == "claude-sonnet-4-6"  # default agent_loop model
 
     # Overriding the config map changes the model — proves it is not hardcoded.
     cfg = Config(models={"agent_loop": "claude-opus-4-7"})
     agent2, _, llm2 = make_agent(tmp_path, replies=["ok"], config=cfg)
     agent2.send("hi")
-    _, model_used2 = llm2.calls[-1]
+    _, model_used2, _ = llm2.calls[-1]
     assert model_used2 == "claude-opus-4-7"
 
 

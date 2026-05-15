@@ -11,7 +11,9 @@ import sys
 
 from .agent import Agent
 from .config import Config
+from .embedder import FastEmbedEmbedder
 from .llm import AnthropicLLMClient
+from .recall import Recall
 from .store import Store
 from .tui import ChatApp
 
@@ -21,7 +23,10 @@ def main() -> None:
         sys.exit("ANTHROPIC_API_KEY is not set")
     db_path = os.environ.get("EMPLOYEE_AGENT_DB", "employee_agent.sqlite")
     store = Store(db_path)
-    agent = Agent(llm=AnthropicLLMClient(), store=store, config=Config())
+    recall = Recall(store, FastEmbedEmbedder(), Config())
+    agent = Agent(
+        llm=AnthropicLLMClient(), store=store, config=Config(), recall=recall
+    )
     ChatApp(agent).run()
     agent.seal()
 
