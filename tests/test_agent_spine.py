@@ -1,4 +1,5 @@
 import datetime as dt
+import threading
 
 from employee_agent.agent import Agent
 from employee_agent.config import Config
@@ -75,3 +76,28 @@ def test_agent_loop_model_is_resolved_from_the_per_task_map(tmp_path):
     agent2.send("hi")
     _, model_used2 = llm2.calls[-1]
     assert model_used2 == "claude-opus-4-7"
+
+
+def test_store_is_usable_from_a_worker_thread(tmp_path):
+    # The TUI runs agent.send() in a Textual worker thread while the Store was
+    # constructed on the main thread. The Store must tolerate cross-thread use.
+    agent, store, _ = make_agent(tmp_path, replies=["from worker"])
+
+    errors = []
+
+    def worker():
+        try:
+            agent.send("hi from another thread")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+
+    assert errors == [], f"send() raised on a worker thread: {errors}"
+    turns = store.turns_of(agent.conversation_id)
+    assert [(turn.role, turn.content) for turn in turns] == [
+        ("user", "hi from another thread"),
+        ("agent", "from worker"),
+    ]
