@@ -23,8 +23,9 @@ from .workspace import Workspace
 logger = logging.getLogger("employee_agent.agent")
 
 # The agent-pulled recall surface (PRD Q8). The local tools (file/web/clock,
-# plus Workspace-confined write_file) hang off the same loop via LocalTools —
-# adding them is purely additive: the recall schemas below are unchanged.
+# Workspace-confined write_file, plus run_command through the Sandbox seam)
+# hang off the same loop via LocalTools — adding them is purely additive: the
+# recall schemas below are unchanged.
 RECALL_SCHEMAS = [
     {
         "name": "search_recall",
@@ -59,12 +60,17 @@ _MAX_TOOL_STEPS = 8  # bound the loop — runaway tool use is a cost hazard
 
 
 class Agent:
-    def __init__(self, llm, store, config, recall, web=None):
+    def __init__(self, llm, store, config, recall, web=None, sandbox=None):
         self._llm = llm
         self._store = store
         self._config = config
         self._recall = recall
-        self._tools = LocalTools(web, Workspace(config.workspace_root))
+        self._tools = LocalTools(
+            web,
+            Workspace(config.workspace_root),
+            sandbox,
+            command_timeout=config.sandbox_command_timeout,
+        )
         self._summarizer = Summarizer(llm, config)
         self.conversation_id = store.start_conversation()
         self._compactor = Compactor(

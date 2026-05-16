@@ -1,26 +1,34 @@
 """The Agent's local tool surface (PRD Q9, Issue 05; confined in Issue 01;
-write added in Issue 02).
+write added in Issue 02; execute added in Issue 03).
 
-This surface is **no longer read-only**: `write_file` creates/overwrites
-files. It runs with no confirmation prompts not because it is harmless but
-because **containment** bounds the blast radius — every filesystem tool
-(`read_file`/`list_dir`/`grep`/`write_file`) is interpreted Workspace-relative
-and routed through the one `Workspace` airlock, so the Agent can neither read
-nor write anything outside the Workspace (ADR-0007). Prompt-free write is the
-band-C analogue of the band-B "read-only ⇒ zero risk": safe by containment,
-not by being crippled. A refused (escaping) path is returned as an ordinary
-tool result, not a crash. Web/clock tools are unchanged; web goes through the
-thin `WebClient` seam. Execution (`run_command`/`Sandbox`) is a later issue —
-there is no execute tool here yet. This surface hangs off the same tool loop
-as Recall and is independent of it.
+This surface is **no longer read-only**: `write_file` creates/overwrites files
+and `run_command` executes commands. None of it prompts not because it is
+harmless but because **containment** bounds the blast radius — every
+filesystem tool (`read_file`/`list_dir`/`grep`/`write_file`) is interpreted
+Workspace-relative and routed through the one `Workspace` airlock, and
+`run_command` runs through the thin `Sandbox` seam (ADR-0007). Prompt-free
+write+execute is the band-C analogue of the band-B "read-only ⇒ zero risk":
+safe by containment, not by being crippled — a confirmation/trust subsystem is
+explicitly rejected. A refused (escaping) path, a failing command, or a
+non-zero exit is returned as an ordinary tool result, not a crash. Execution
+is a cost/time surface, so each command's wall-clock duration and exit status
+are logged, mirroring the Compaction cost-observability discipline. The real
+Docker-backed `Sandbox` lands in Issue 04; here it is a structural seam proven
+with a fake. Web/clock tools are unchanged; web goes through the thin
+`WebClient` seam. This surface hangs off the same tool loop as Recall and is
+independent of it.
 """
 
 import datetime as dt
 import json
+import logging
 import os
 import re
+import time
 
 from .workspace import WorkspaceError
+
+logger = logging.getLogger("employee_agent.tools")
 
 # A single read can pull an unbounded file into the model's context — a cost
 # hazard this whole project is about bounding. Cap it (mirrors the agent
@@ -32,9 +40,11 @@ _MAX_GREP_MATCHES = 200
 
 
 class LocalTools:
-    def __init__(self, web, workspace):
+    def __init__(self, web, workspace, sandbox=None, command_timeout=30):
         self._web = web
         self._workspace = workspace
+        self._sandbox = sandbox
+        self._command_timeout = command_timeout
 
     SCHEMAS = [
         {
@@ -92,6 +102,20 @@ class LocalTools:
             },
         },
         {
+            "name": "run_command",
+            "description": (
+                "Run a shell command in the Workspace and get back its "
+                "stdout, stderr, exit code and whether it timed out. Use this "
+                "to execute a script you wrote. No network is available to "
+                "the command; it can only touch the Workspace."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            },
+        },
+        {
             "name": "web_search",
             "description": (
                 "Search the web for a query. Returns a list of results, each "
@@ -145,6 +169,8 @@ class LocalTools:
             return self._grep(tool_input["pattern"], tool_input["path"])
         if name == "write_file":
             return self._write_file(tool_input["path"], tool_input["content"])
+        if name == "run_command":
+            return self._run_command(tool_input["command"])
         if name == "web_search":
             return self._web_search(tool_input["query"])
         if name == "fetch_url":
@@ -168,6 +194,34 @@ class LocalTools:
         with open(resolved, "w", encoding="utf-8") as f:
             f.write(content)
         return f"wrote {path}"
+
+    def _run_command(self, command: str) -> str:
+        # Execution is a cost/time surface (ADR-0007, PRD Observability): time
+        # the command's wall clock and log its duration + exit status, the
+        # same structured cost log as Compaction. The Sandbox itself enforces
+        # the bound; a non-zero exit or timeout is a *result* the Agent reads
+        # and relays, never a crashed Turn — the run() contract does not raise
+        # for a merely-failing command.
+        start = time.perf_counter()
+        result = self._sandbox.run(command, self._command_timeout)
+        duration_ms = round((time.perf_counter() - start) * 1000)
+        logger.info(
+            "run_command",
+            extra={
+                "command": command,
+                "duration_ms": duration_ms,
+                "exit_code": result.exit_code,
+                "timed_out": result.timed_out,
+            },
+        )
+        return json.dumps(
+            {
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "exit_code": result.exit_code,
+                "timed_out": result.timed_out,
+            }
+        )
 
     def _list_dir(self, path: str) -> str:
         resolved = self._workspace.resolve(path)

@@ -1,6 +1,6 @@
 # 03 — run_command end-to-end via a fake Sandbox
 
-Status: ready-for-agent
+Status: ready-for-human
 
 ## Parent
 
@@ -16,12 +16,12 @@ End-to-end demo via the fake: the User asks the Agent to write a script and run 
 
 ## Acceptance criteria
 
-- [ ] A `Sandbox` interface exists: `run(command, timeout) → ExecResult{ stdout, stderr, exit_code, timed_out }`
-- [ ] A fake `Sandbox` implementation exists for tests — deterministic, no Docker
-- [ ] A `run_command` tool delegates to `Sandbox.run` and is invocable by the Agent within a Turn
-- [ ] `run_command` runs with no confirmation prompt
-- [ ] Executed-command wall-clock duration and exit status are logged
-- [ ] Tests: agent-loop integration with the fake `Sandbox` — a scripted "write a script then run it" routes `write_file` → `run_command` and the result is incorporated into the reply
+- [x] A `Sandbox` interface exists: `run(command, timeout) → ExecResult{ stdout, stderr, exit_code, timed_out }`
+- [x] A fake `Sandbox` implementation exists for tests — deterministic, no Docker
+- [x] A `run_command` tool delegates to `Sandbox.run` and is invocable by the Agent within a Turn
+- [x] `run_command` runs with no confirmation prompt
+- [x] Executed-command wall-clock duration and exit status are logged
+- [x] Tests: agent-loop integration with the fake `Sandbox` — a scripted "write a script then run it" routes `write_file` → `run_command` and the result is incorporated into the reply
 
 ## Blocked by
 

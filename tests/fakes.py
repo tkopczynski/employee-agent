@@ -7,6 +7,7 @@ tests can assert which model the agent loop resolved.
 
 
 from employee_agent.llm import Response, ToolCall
+from employee_agent.sandbox import ExecResult
 from employee_agent.summarizer import Summary
 from employee_agent.web import SearchResult
 
@@ -53,6 +54,24 @@ class FakeWebClient:
     def fetch(self, url):
         self.fetched.append(url)
         return self._pages.get(url, "")
+
+
+class FakeSandbox:
+    """Deterministic Sandbox double (Issue 03), mirroring FakeWebClient.
+    `results` maps a command to a canned ExecResult; an unmapped command is a
+    benign empty success. Records every (command, timeout) so tests can assert
+    the agent loop routes run_command through the seam without Docker."""
+
+    def __init__(self, results=None):
+        self._results = results or {}
+        self.calls = []  # list of (command, timeout) in call order
+
+    def run(self, command, timeout):
+        self.calls.append((command, timeout))
+        return self._results.get(
+            command,
+            ExecResult(stdout="", stderr="", exit_code=0, timed_out=False),
+        )
 
 
 class FakeSummarizer:

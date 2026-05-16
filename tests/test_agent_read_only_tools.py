@@ -20,10 +20,12 @@ from employee_agent.llm import ToolCall
 from employee_agent.recall import Recall
 from employee_agent.store import Store
 
-from fakes import TopicEmbedder, FakeLLMClient, FakeWebClient
+from employee_agent.sandbox import ExecResult
+
+from fakes import TopicEmbedder, FakeLLMClient, FakeWebClient, FakeSandbox
 
 
-def _make_agent(tmp_path, replies, web=None):
+def _make_agent(tmp_path, replies, web=None, sandbox=None):
     # The Workspace is the Agent's entire filesystem surface (Issue 01): all
     # file-tool paths are interpreted relative to this configured root, and
     # nothing outside it is reachable.
@@ -34,7 +36,12 @@ def _make_agent(tmp_path, replies, web=None):
     recall = Recall(store, TopicEmbedder(), cfg)
     llm = FakeLLMClient(replies=replies)
     agent = Agent(
-        llm=llm, store=store, config=cfg, recall=recall, web=web or FakeWebClient()
+        llm=llm,
+        store=store,
+        config=cfg,
+        recall=recall,
+        web=web or FakeWebClient(),
+        sandbox=sandbox,
     )
     return agent, store, llm, ws
 
@@ -352,29 +359,136 @@ def test_grep_skips_a_symlinked_file_that_points_out_of_the_workspace(tmp_path):
     assert "exfiltrated payload" not in followup_blob
 
 
-def test_full_tool_surface_is_registered_with_write_but_no_execute_yet(tmp_path):
+def test_full_tool_surface_is_registered_with_write_and_execute(tmp_path):
     agent, _store, llm, _ws = _make_agent(tmp_path, replies=["hello"])
 
     agent.send("hi")
 
     offered = {t["name"] for t in llm.calls[0][2]}
-    # The band-B file/web/clock tools and write_file, alongside recall.
+    # The band-B file/web/clock tools, write_file and run_command, alongside
+    # recall.
     assert {
         "read_file",
         "list_dir",
         "grep",
         "write_file",
+        "run_command",
         "web_search",
         "fetch_url",
         "current_time",
     } <= offered
     assert {"search_recall", "get_conversation"} <= offered
-    # The surface is no longer read-only: it can write into the Workspace
-    # (containment, not read-only-ness, is the trust model — ADR-0007).
-    # But execution is a LATER issue: no shell/run_command/exec yet.
+    # The surface is no longer read-only and no longer write-only: it can
+    # write into and execute within the Workspace (containment, not
+    # read-only-ness, is the trust model — ADR-0007). Execution is a single
+    # general run_command (PRD): there is deliberately no separate `shell`,
+    # `exec` or `delete` tool.
     assert "shell" not in offered
     assert not any(
-        bad in name
-        for name in offered
-        for bad in ("exec", "delete", "shell", "run_command")
+        bad in name for name in offered for bad in ("exec", "delete", "shell")
     )
+
+
+def test_write_then_run_command_routes_through_sandbox_and_grounds_the_reply(
+    tmp_path,
+):
+    # PRD US-2/US-3 headline: the User asks for a script *and a result*; the
+    # Agent writes the script then runs it through the Sandbox seam, and the
+    # command's output grounds the reply. run_command is prompt-free —
+    # containment is the trust model (ADR-0007), so the loop just runs it.
+    sandbox = FakeSandbox(
+        results={
+            "python3 sum.py": ExecResult(
+                stdout="42\n", stderr="", exit_code=0, timed_out=False
+            )
+        }
+    )
+    agent, store, llm, ws = _make_agent(
+        tmp_path,
+        sandbox=sandbox,
+        replies=[
+            ToolCall(
+                id="w1",
+                name="write_file",
+                input={"path": "sum.py", "content": "print(40 + 2)\n"},
+            ),
+            ToolCall(
+                id="r1",
+                name="run_command",
+                input={"command": "python3 sum.py"},
+            ),
+            "The script printed 42.",
+        ],
+    )
+
+    reply = agent.send("write a script that sums 40 and 2, then run it")
+
+    assert reply == "The script printed 42."
+    # write_file actually created the script in the Workspace...
+    assert (ws / "sum.py").read_text() == "print(40 + 2)\n"
+    # ...and run_command was delegated to the Sandbox seam exactly once (no
+    # Docker here), honouring the run(command, timeout) contract.
+    assert [cmd for cmd, _t in sandbox.calls] == ["python3 sum.py"]
+    assert sandbox.calls[0][1] > 0  # a positive timeout was passed through
+    # The command's stdout was fed back into the follow-up call so it could
+    # ground the reply.
+    after_run = json.dumps(llm.calls[2][0])
+    assert "42" in after_run
+    # Prompt-free: exactly request -> write -> run -> reply. No confirmation
+    # round-trip was injected before the command ran (ADR-0007).
+    assert len(llm.calls) == 3
+    # run_command is offered to the model on every call.
+    offered = [{t["name"] for t in tools} for (_m, _model, tools) in llm.calls]
+    assert offered and all("run_command" in names for names in offered)
+    # Turn semantics preserved: only the User Turn + final Agent Turn persist
+    # (the write+run round-trips are intra-Turn hot-context mechanics).
+    turns = store.turns_of(agent.conversation_id)
+    assert [(t.role, t.content) for t in turns] == [
+        ("user", "write a script that sums 40 and 2, then run it"),
+        ("agent", "The script printed 42."),
+    ]
+
+
+def test_run_command_nonzero_exit_is_relayed_not_a_crashed_turn(tmp_path):
+    # Band-C error contract, the same as a failing web fetch: a command that
+    # exits non-zero is a *result* the Agent reads and relays, not an
+    # exception that kills the Turn. stderr and the exit code are surfaced so
+    # the Agent can explain what went wrong.
+    sandbox = FakeSandbox(
+        results={
+            "python3 broken.py": ExecResult(
+                stdout="",
+                stderr="NameError: name 'foo' is not defined\n",
+                exit_code=1,
+                timed_out=False,
+            )
+        }
+    )
+    agent, store, llm, _ws = _make_agent(
+        tmp_path,
+        sandbox=sandbox,
+        replies=[
+            ToolCall(
+                id="r1",
+                name="run_command",
+                input={"command": "python3 broken.py"},
+            ),
+            "The script failed with a NameError.",
+        ],
+    )
+
+    reply = agent.send("run broken.py")
+
+    assert reply == "The script failed with a NameError."
+    # The non-zero exit and stderr were fed back so the Agent could explain;
+    # the run still happened (it is not refused, just reported failed).
+    assert [cmd for cmd, _t in sandbox.calls] == ["python3 broken.py"]
+    followup_blob = json.dumps(llm.calls[1][0])
+    assert "NameError" in followup_blob
+    assert "exit_code" in followup_blob
+    # The Turn persisted cleanly: User input + the relayed explanation.
+    turns = store.turns_of(agent.conversation_id)
+    assert [(t.role, t.content) for t in turns] == [
+        ("user", "run broken.py"),
+        ("agent", "The script failed with a NameError."),
+    ]

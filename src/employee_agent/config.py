@@ -35,17 +35,25 @@ class Config:
     # ethos as the model map and the cost caps above.
     DEFAULT_WORKSPACE = {"root": "workspace"}
 
+    # Execution is a cost/time surface (ADR-0007, PRD US-12/US-16): the
+    # per-command wall-clock cap is configuration, never hardcoded, exactly
+    # like the recall/compaction caps. The image and CPU/memory limits join
+    # this section with the real Docker-backed Sandbox (Issue 04).
+    DEFAULT_SANDBOX = {"command_timeout": 30}
+
     def __init__(
         self,
         models: dict[str, str] | None = None,
         recall: dict[str, int] | None = None,
         compaction: dict | None = None,
         workspace: dict | None = None,
+        sandbox: dict | None = None,
     ):
         self._models = {**self.DEFAULT_MODELS, **(models or {})}
         self._recall = {**self.DEFAULT_RECALL, **(recall or {})}
         self._compaction = {**self.DEFAULT_COMPACTION, **(compaction or {})}
         self._workspace = {**self.DEFAULT_WORKSPACE, **(workspace or {})}
+        self._sandbox = {**self.DEFAULT_SANDBOX, **(sandbox or {})}
 
     def model_for(self, task: str) -> str:
         return self._models[task]
@@ -81,3 +89,7 @@ class Config:
     @property
     def workspace_root(self) -> str:
         return self._workspace["root"]
+
+    @property
+    def sandbox_command_timeout(self) -> float:
+        return self._sandbox["command_timeout"]
