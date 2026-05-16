@@ -5,3 +5,5 @@ The Employee Agent is a single-user pet project where the interesting work lives
 Rejected alternatives: Qdrant (purpose-built vector DB, but adds Docker + a network hop for no benefit at single-user scale); Postgres + pgvector (heaviest; adds two unrelated learning curves); FTS5-only without vectors (would miss fuzzy paraphrases like "draft a one-pager" matching "prepare a report").
 
 Revisit when: Recall grows past tens of thousands of Turns and SQLite + sqlite-vec starts straining; or when the planned C-band capabilities (writes, side effects) require out-of-process tool sandboxing.
+
+> Partially superseded by [ADR-0007](./0007-band-c-sandboxed-workspace.md): the "C-band sandboxing" trigger above has fired. The no-Docker clause is superseded **for tool execution only** — the application itself remains single-process Python + SQLite; only the Workspace's read/write/execute runs in a container.
