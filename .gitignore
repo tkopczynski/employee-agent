@@ -5,3 +5,7 @@ __pycache__/
 *.sqlite
 *.sqlite3
 .env
+
+# Default Workspace root (ADR-0007): the Agent's disposable working area.
+# A real Workspace is git-tracked/backed-up by the User out-of-tree, not here.
+workspace/

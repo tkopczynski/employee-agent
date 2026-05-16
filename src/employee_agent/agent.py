@@ -18,6 +18,7 @@ from .compactor import Compactor
 from .recall import Unit
 from .summarizer import Summarizer
 from .tools import ReadOnlyTools
+from .workspace import Workspace
 
 logger = logging.getLogger("employee_agent.agent")
 
@@ -63,7 +64,7 @@ class Agent:
         self._store = store
         self._config = config
         self._recall = recall
-        self._tools = ReadOnlyTools(web)
+        self._tools = ReadOnlyTools(web, Workspace(config.workspace_root))
         self._summarizer = Summarizer(llm, config)
         self.conversation_id = store.start_conversation()
         self._compactor = Compactor(

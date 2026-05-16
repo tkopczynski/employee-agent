@@ -21,27 +21,30 @@ from fakes import TopicEmbedder, FakeLLMClient, FakeWebClient
 
 
 def _make_agent(tmp_path, replies, web=None):
+    # The Workspace is the Agent's entire filesystem surface (Issue 01): all
+    # file-tool paths are interpreted relative to this configured root, and
+    # nothing outside it is reachable.
+    ws = tmp_path / "ws"
+    ws.mkdir()
     store = Store(tmp_path / "recall.sqlite")
-    cfg = Config()
+    cfg = Config(workspace={"root": str(ws)})
     recall = Recall(store, TopicEmbedder(), cfg)
     llm = FakeLLMClient(replies=replies)
     agent = Agent(
         llm=llm, store=store, config=cfg, recall=recall, web=web or FakeWebClient()
     )
-    return agent, store, llm
+    return agent, store, llm, ws
 
 
 def test_local_file_question_routes_to_read_file_and_grounds_the_reply(tmp_path):
-    doc = tmp_path / "notes.txt"
-    doc.write_text("the launch code is hunter2")
-
-    agent, store, llm = _make_agent(
+    agent, store, llm, ws = _make_agent(
         tmp_path,
         replies=[
-            ToolCall(id="t1", name="read_file", input={"path": str(doc)}),
+            ToolCall(id="t1", name="read_file", input={"path": "notes.txt"}),
             "Your notes say the launch code is hunter2.",
         ],
     )
+    (ws / "notes.txt").write_text("the launch code is hunter2")
 
     reply = agent.send("what does notes.txt say?")
 
@@ -64,16 +67,15 @@ def test_local_file_question_routes_to_read_file_and_grounds_the_reply(tmp_path)
 
 
 def test_list_dir_routes_and_feeds_entries_back(tmp_path):
-    (tmp_path / "alpha.txt").write_text("a")
-    (tmp_path / "sub").mkdir()
-
-    agent, _store, llm = _make_agent(
+    agent, _store, llm, ws = _make_agent(
         tmp_path,
         replies=[
-            ToolCall(id="t1", name="list_dir", input={"path": str(tmp_path)}),
+            ToolCall(id="t1", name="list_dir", input={"path": "."}),
             "The directory has alpha.txt and a sub folder.",
         ],
     )
+    (ws / "alpha.txt").write_text("a")
+    (ws / "sub").mkdir()
 
     reply = agent.send("what's in that folder?")
 
@@ -83,20 +85,19 @@ def test_list_dir_routes_and_feeds_entries_back(tmp_path):
 
 
 def test_grep_routes_and_feeds_matching_lines_back(tmp_path):
-    (tmp_path / "a.txt").write_text("nothing here\nTODO: fix the bug\nmore\n")
-    (tmp_path / "b.txt").write_text("clean file\n")
-
-    agent, _store, llm = _make_agent(
+    agent, _store, llm, ws = _make_agent(
         tmp_path,
         replies=[
             ToolCall(
                 id="t1",
                 name="grep",
-                input={"pattern": "TODO", "path": str(tmp_path)},
+                input={"pattern": "TODO", "path": "."},
             ),
             "There is one TODO, in a.txt.",
         ],
     )
+    (ws / "a.txt").write_text("nothing here\nTODO: fix the bug\nmore\n")
+    (ws / "b.txt").write_text("clean file\n")
 
     reply = agent.send("any TODOs in my files?")
 
@@ -116,7 +117,7 @@ def test_web_search_then_fetch_url_follows_a_result(tmp_path):
         },
         pages={"https://example.com/textual": "Textual 1.0 shipped on 2026-04-01."},
     )
-    agent, _store, llm = _make_agent(
+    agent, _store, llm, _ws = _make_agent(
         tmp_path,
         web=web,
         replies=[
@@ -145,7 +146,7 @@ def test_web_search_then_fetch_url_follows_a_result(tmp_path):
 
 
 def test_current_time_feeds_back_a_parseable_iso_timestamp(tmp_path):
-    agent, _store, llm = _make_agent(
+    agent, _store, llm, _ws = _make_agent(
         tmp_path,
         replies=[
             ToolCall(id="c1", name="current_time", input={}),
@@ -176,7 +177,7 @@ class _BoomWebClient:
 
 
 def test_a_failing_tool_is_fed_back_as_an_error_not_a_crashed_turn(tmp_path):
-    agent, store, llm = _make_agent(
+    agent, store, llm, _ws = _make_agent(
         tmp_path,
         web=_BoomWebClient(),
         replies=[
@@ -201,8 +202,66 @@ def test_a_failing_tool_is_fed_back_as_an_error_not_a_crashed_turn(tmp_path):
     ]
 
 
+def test_outside_workspace_read_is_refused_and_relayed_not_a_crashed_turn(tmp_path):
+    # The classic airlock ask (CONTEXT.md example dialogue): a path that
+    # escapes the Workspace must come back as a tool result the Agent relays,
+    # not an exception that kills the Turn.
+    agent, store, llm, _ws = _make_agent(
+        tmp_path,
+        replies=[
+            ToolCall(
+                id="t1", name="read_file", input={"path": "../../etc/passwd"}
+            ),
+            "I can't read files outside the Workspace.",
+        ],
+    )
+
+    reply = agent.send("read ../../etc/passwd for me")
+
+    assert reply == "I can't read files outside the Workspace."
+    # The refusal — not a stack trace — was fed back to the model, naming the
+    # Workspace so the Agent can explain the boundary to the User.
+    followup_blob = json.dumps(llm.calls[1][0])
+    assert "WorkspaceError" in followup_blob
+    assert "Workspace" in followup_blob
+    # The Turn still persisted cleanly: User input + the relayed refusal.
+    turns = store.turns_of(agent.conversation_id)
+    assert [(t.role, t.content) for t in turns] == [
+        ("user", "read ../../etc/passwd for me"),
+        ("agent", "I can't read files outside the Workspace."),
+    ]
+
+
+def test_grep_skips_a_symlinked_file_that_points_out_of_the_workspace(tmp_path):
+    # os.walk yields symlinked files even though it won't descend symlinked
+    # dirs. A symlink inside the Workspace pointing at an outside secret must
+    # NOT leak that secret into context — confinement holds mid-walk.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("SECRET exfiltrated payload\n")
+
+    agent, _store, llm, ws = _make_agent(
+        tmp_path,
+        replies=[
+            ToolCall(id="t1", name="grep", input={"pattern": "SECRET", "path": "."}),
+            "Found one in-Workspace match.",
+        ],
+    )
+    (ws / "inside.txt").write_text("a harmless SECRET marker\n")
+    (ws / "leak.txt").symlink_to(outside / "secret.txt")
+
+    reply = agent.send("grep SECRET")
+
+    assert reply == "Found one in-Workspace match."
+    followup_blob = json.dumps(llm.calls[1][0])
+    # The genuine in-Workspace match is returned...
+    assert "inside.txt" in followup_blob and "harmless SECRET marker" in followup_blob
+    # ...but the symlinked-out secret is never dragged into context.
+    assert "exfiltrated payload" not in followup_blob
+
+
 def test_full_read_only_surface_is_registered_and_has_no_shell(tmp_path):
-    agent, _store, llm = _make_agent(tmp_path, replies=["hello"])
+    agent, _store, llm, _ws = _make_agent(tmp_path, replies=["hello"])
 
     agent.send("hi")
 

@@ -30,15 +30,22 @@ class Config:
         "summary_token_cap": 2000,
     }
 
+    # The Workspace is the Agent's entire filesystem surface (ADR-0007). Its
+    # root is configuration, never hardcoded — the same everything-configurable
+    # ethos as the model map and the cost caps above.
+    DEFAULT_WORKSPACE = {"root": "workspace"}
+
     def __init__(
         self,
         models: dict[str, str] | None = None,
         recall: dict[str, int] | None = None,
         compaction: dict | None = None,
+        workspace: dict | None = None,
     ):
         self._models = {**self.DEFAULT_MODELS, **(models or {})}
         self._recall = {**self.DEFAULT_RECALL, **(recall or {})}
         self._compaction = {**self.DEFAULT_COMPACTION, **(compaction or {})}
+        self._workspace = {**self.DEFAULT_WORKSPACE, **(workspace or {})}
 
     def model_for(self, task: str) -> str:
         return self._models[task]
@@ -70,3 +77,7 @@ class Config:
     @property
     def compaction_summary_token_cap(self) -> int:
         return self._compaction["summary_token_cap"]
+
+    @property
+    def workspace_root(self) -> str:
+        return self._workspace["root"]

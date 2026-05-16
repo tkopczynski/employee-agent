@@ -23,12 +23,16 @@ def main() -> None:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         sys.exit("ANTHROPIC_API_KEY is not set")
     db_path = os.environ.get("EMPLOYEE_AGENT_DB", "employee_agent.sqlite")
+    # The Workspace root is configuration, never hardcoded (ADR-0007). Mirrors
+    # EMPLOYEE_AGENT_DB: env-overridable with a sensible default.
+    ws_root = os.environ.get("EMPLOYEE_AGENT_WORKSPACE", "workspace")
+    config = Config(workspace={"root": ws_root})
     store = Store(db_path)
-    recall = Recall(store, FastEmbedEmbedder(), Config())
+    recall = Recall(store, FastEmbedEmbedder(), config)
     agent = Agent(
         llm=AnthropicLLMClient(),
         store=store,
-        config=Config(),
+        config=config,
         recall=recall,
         web=AnthropicWebClient(),
     )

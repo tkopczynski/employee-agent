@@ -1,16 +1,22 @@
-"""The band-B read-only local tool surface (PRD Q9, Issue 05).
+"""The read-only local tool surface (PRD Q9, Issue 05; confined in Issue 01).
 
 These tools never write or cause side effects, so they run with no
-confirmation prompts (read-only ⇒ zero risk). Filesystem/clock tools are
-pure local operations; web tools go through the thin `WebClient` seam.
-There is deliberately no `shell` tool. This surface hangs off the same tool
-loop as Recall and is independent of it.
+confirmation prompts (read-only ⇒ zero risk). The filesystem tools
+(`read_file`/`list_dir`/`grep`) are confined to the **Workspace**: every path
+is interpreted relative to the Workspace root and routed through the
+`Workspace` airlock, so the Agent has no filesystem reach outside it
+(ADR-0007). A refused path is returned as an ordinary tool result, not a
+crash. Web/clock tools are unchanged; web goes through the thin `WebClient`
+seam. There is deliberately no `shell` tool. This surface hangs off the same
+tool loop as Recall and is independent of it.
 """
 
 import datetime as dt
 import json
 import os
 import re
+
+from .workspace import WorkspaceError
 
 # A single read can pull an unbounded file into the model's context — a cost
 # hazard this whole project is about bounding. Cap it (mirrors the agent
@@ -22,8 +28,9 @@ _MAX_GREP_MATCHES = 200
 
 
 class ReadOnlyTools:
-    def __init__(self, web):
+    def __init__(self, web, workspace):
         self._web = web
+        self._workspace = workspace
 
     SCHEMAS = [
         {
@@ -125,7 +132,8 @@ class ReadOnlyTools:
         return f"unknown tool: {name}"
 
     def _read_file(self, path: str) -> str:
-        with open(path, "rb") as f:
+        resolved = self._workspace.resolve(path)
+        with open(resolved, "rb") as f:
             raw = f.read(_MAX_FILE_BYTES + 1)
         if len(raw) > _MAX_FILE_BYTES:
             text = raw[:_MAX_FILE_BYTES].decode("utf-8", errors="replace")
@@ -133,29 +141,39 @@ class ReadOnlyTools:
         return raw.decode("utf-8", errors="replace")
 
     def _list_dir(self, path: str) -> str:
+        resolved = self._workspace.resolve(path)
         entries = []
-        for name in sorted(os.listdir(path)):
-            full = os.path.join(path, name)
+        for name in sorted(os.listdir(resolved)):
+            full = os.path.join(resolved, name)
             entries.append(name + "/" if os.path.isdir(full) else name)
         return "\n".join(entries)
 
     def _grep(self, pattern: str, path: str) -> str:
         rx = re.compile(pattern)
-        if os.path.isdir(path):
+        base = self._workspace.resolve(path)
+        if base.is_dir():
             files = [
                 os.path.join(root, f)
-                for root, _dirs, names in os.walk(path)
+                for root, _dirs, names in os.walk(base)
                 for f in names
             ]
         else:
-            files = [path]
+            files = [str(base)]
+        root = self._workspace.root
         matches = []
         for fpath in sorted(files):
+            # Defence in depth: a symlinked file inside the tree that points
+            # out of the Workspace is skipped — confinement stays the
+            # airlock's single responsibility, even mid-walk.
+            try:
+                self._workspace.resolve(os.path.relpath(fpath, root))
+            except WorkspaceError:
+                continue
             try:
                 with open(fpath, encoding="utf-8", errors="replace") as fh:
                     for lineno, line in enumerate(fh, 1):
                         if rx.search(line):
-                            rel = os.path.relpath(fpath, path)
+                            rel = os.path.relpath(fpath, base)
                             matches.append(f"{rel}:{lineno}:{line.rstrip()}")
                             if len(matches) >= _MAX_GREP_MATCHES:
                                 matches.append("[truncated]")
