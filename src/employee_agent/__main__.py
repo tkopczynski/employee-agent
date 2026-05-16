@@ -14,6 +14,7 @@ from .config import Config
 from .embedder import FastEmbedEmbedder
 from .llm import AnthropicLLMClient
 from .recall import Recall
+from .sandbox import DockerSandbox
 from .store import Store
 from .tui import ChatApp
 from .web import AnthropicWebClient
@@ -35,6 +36,9 @@ def main() -> None:
         config=config,
         recall=recall,
         web=AnthropicWebClient(),
+        # Tool execution runs in the real Docker-backed Sandbox over the same
+        # Workspace root the file tools are confined to (ADR-0007 / Issue 04).
+        sandbox=DockerSandbox(config.workspace_root, config),
     )
     ChatApp(agent).run()
     agent.seal()

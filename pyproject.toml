@@ -28,3 +28,6 @@ packages = ["src/employee_agent"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "docker: real-Docker integration test (ADR-0007); skipped when no Docker daemon is reachable",
+]

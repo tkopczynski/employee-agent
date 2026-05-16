@@ -12,9 +12,10 @@ safe by containment, not by being crippled — a confirmation/trust subsystem is
 explicitly rejected. A refused (escaping) path, a failing command, or a
 non-zero exit is returned as an ordinary tool result, not a crash. Execution
 is a cost/time surface, so each command's wall-clock duration and exit status
-are logged, mirroring the Compaction cost-observability discipline. The real
-Docker-backed `Sandbox` lands in Issue 04; here it is a structural seam proven
-with a fake. Web/clock tools are unchanged; web goes through the thin
+are logged, mirroring the Compaction cost-observability discipline. The
+`Sandbox` is real and Docker-backed in production (`DockerSandbox`, Issue 04)
+and faked in the agent-loop tests — the same seam pattern as the LLM/Web/
+Embedder adapters. Web/clock tools are unchanged; web goes through the thin
 `WebClient` seam. This surface hangs off the same tool loop as Recall and is
 independent of it.
 """

@@ -35,11 +35,17 @@ class Config:
     # ethos as the model map and the cost caps above.
     DEFAULT_WORKSPACE = {"root": "workspace"}
 
-    # Execution is a cost/time surface (ADR-0007, PRD US-12/US-16): the
-    # per-command wall-clock cap is configuration, never hardcoded, exactly
-    # like the recall/compaction caps. The image and CPU/memory limits join
-    # this section with the real Docker-backed Sandbox (Issue 04).
-    DEFAULT_SANDBOX = {"command_timeout": 30}
+    # Execution is a cost/time surface (ADR-0007, PRD US-12/US-15/US-16): the
+    # pinned image tag and the CPU / memory / wall-clock caps are all
+    # configuration, never hardcoded, exactly like the recall/compaction caps.
+    # The real Docker-backed Sandbox (Issue 04) reads every knob from here, so
+    # the cost-vs-capability trade-off stays tunable and measurable.
+    DEFAULT_SANDBOX = {
+        "command_timeout": 30,
+        "image": "employee-agent-sandbox:1",
+        "cpus": "1.0",
+        "memory": "512m",
+    }
 
     def __init__(
         self,
@@ -93,3 +99,15 @@ class Config:
     @property
     def sandbox_command_timeout(self) -> float:
         return self._sandbox["command_timeout"]
+
+    @property
+    def sandbox_image(self) -> str:
+        return self._sandbox["image"]
+
+    @property
+    def sandbox_cpus(self) -> str:
+        return self._sandbox["cpus"]
+
+    @property
+    def sandbox_memory(self) -> str:
+        return self._sandbox["memory"]
