@@ -1,11 +1,14 @@
-"""Agent read-only tool surface (PRD Q9, Issue 05).
+"""Agent local tool surface (PRD Q9, Issue 05; Workspace-confined in Issue 01;
+write_file added in Issue 02).
 
 End-to-end through Agent.send with a faked LLMClient that scripts a tool
 call, mirroring test_agent_tools.py. We assert the observable wiring
-contract: the read-only tools are offered, a scripted tool call is executed
-and its result fed back into the follow-up call, and the model's post-tool
-text is what the User gets. Network tools go through a faked WebClient so
-tests stay offline (PRD Testing Decisions). We never assert on model phrasing.
+contract: the tools are offered, a scripted tool call is executed and its
+result fed back into the follow-up call, and the model's post-tool text is
+what the User gets — including write_file creating a file in the Workspace
+and an escaping write being refused by the same airlock as the reads.
+Network tools go through a faked WebClient so tests stay offline (PRD Testing
+Decisions). We never assert on model phrasing.
 """
 
 import datetime as dt
@@ -202,6 +205,61 @@ def test_a_failing_tool_is_fed_back_as_an_error_not_a_crashed_turn(tmp_path):
     ]
 
 
+def test_save_request_routes_to_write_file_and_file_appears_in_workspace(tmp_path):
+    # The PRD's first user story: the User asks the Agent to save something
+    # and the file appears in the Workspace. Write runs prompt-free —
+    # containment is the trust model (ADR-0007), so the loop just runs it.
+    agent, store, llm, ws = _make_agent(
+        tmp_path,
+        replies=[
+            ToolCall(
+                id="w1",
+                name="write_file",
+                input={"path": "hello.py", "content": "print('hi')\n"},
+            ),
+            "Saved hello.py for you.",
+        ],
+    )
+
+    reply = agent.send("save a hello world script as hello.py")
+
+    assert reply == "Saved hello.py for you."
+    # The file actually appears in the Workspace with the given content.
+    assert (ws / "hello.py").read_text() == "print('hi')\n"
+    # write_file is offered to the model on every call.
+    offered = [{t["name"] for t in tools} for (_m, _model, tools) in llm.calls]
+    assert offered and all("write_file" in names for names in offered)
+    # Turn semantics preserved: only the User Turn + final Agent Turn persist
+    # (the write round-trip is intra-Turn hot-context mechanics, not a Turn).
+    turns = store.turns_of(agent.conversation_id)
+    assert [(t.role, t.content) for t in turns] == [
+        ("user", "save a hello world script as hello.py"),
+        ("agent", "Saved hello.py for you."),
+    ]
+
+
+def test_write_file_creates_missing_parent_dirs_under_the_workspace(tmp_path):
+    # The build-a-script loop should not need a separate mkdir step: writing
+    # a nested Workspace-relative path creates its parent dirs in the
+    # Workspace (still routed through the same airlock).
+    agent, _store, llm, ws = _make_agent(
+        tmp_path,
+        replies=[
+            ToolCall(
+                id="w1",
+                name="write_file",
+                input={"path": "reports/q2/out.txt", "content": "42\n"},
+            ),
+            "Wrote reports/q2/out.txt.",
+        ],
+    )
+
+    reply = agent.send("save the result under reports/q2/out.txt")
+
+    assert reply == "Wrote reports/q2/out.txt."
+    assert (ws / "reports" / "q2" / "out.txt").read_text() == "42\n"
+
+
 def test_outside_workspace_read_is_refused_and_relayed_not_a_crashed_turn(tmp_path):
     # The classic airlock ask (CONTEXT.md example dialogue): a path that
     # escapes the Workspace must come back as a tool result the Agent relays,
@@ -229,6 +287,40 @@ def test_outside_workspace_read_is_refused_and_relayed_not_a_crashed_turn(tmp_pa
     assert [(t.role, t.content) for t in turns] == [
         ("user", "read ../../etc/passwd for me"),
         ("agent", "I can't read files outside the Workspace."),
+    ]
+
+
+def test_outside_workspace_write_is_refused_by_the_same_airlock(tmp_path):
+    # A write must hit the SAME airlock as the reads (Issue 01): an escaping
+    # write path is refused identically — relayed as a tool result naming the
+    # Workspace, the Turn persists cleanly, and nothing is written outside.
+    agent, store, llm, _ws = _make_agent(
+        tmp_path,
+        replies=[
+            ToolCall(
+                id="w1",
+                name="write_file",
+                input={"path": "../outside_secret", "content": "exfil"},
+            ),
+            "I can't write outside the Workspace.",
+        ],
+    )
+
+    reply = agent.send("write exfil to ../outside_secret")
+
+    assert reply == "I can't write outside the Workspace."
+    # Nothing was written outside the Workspace.
+    assert not (tmp_path / "outside_secret").exists()
+    # The refusal — not a stack trace — was fed back, naming the Workspace so
+    # the Agent can explain the boundary, exactly like the read refusal.
+    followup_blob = json.dumps(llm.calls[1][0])
+    assert "WorkspaceError" in followup_blob
+    assert "Workspace" in followup_blob
+    # The Turn still persisted cleanly: User input + the relayed refusal.
+    turns = store.turns_of(agent.conversation_id)
+    assert [(t.role, t.content) for t in turns] == [
+        ("user", "write exfil to ../outside_secret"),
+        ("agent", "I can't write outside the Workspace."),
     ]
 
 
@@ -260,26 +352,29 @@ def test_grep_skips_a_symlinked_file_that_points_out_of_the_workspace(tmp_path):
     assert "exfiltrated payload" not in followup_blob
 
 
-def test_full_read_only_surface_is_registered_and_has_no_shell(tmp_path):
+def test_full_tool_surface_is_registered_with_write_but_no_execute_yet(tmp_path):
     agent, _store, llm, _ws = _make_agent(tmp_path, replies=["hello"])
 
     agent.send("hi")
 
     offered = {t["name"] for t in llm.calls[0][2]}
-    # All six band-B read-only tools, alongside the recall surface.
+    # The band-B file/web/clock tools and write_file, alongside recall.
     assert {
         "read_file",
         "list_dir",
         "grep",
+        "write_file",
         "web_search",
         "fetch_url",
         "current_time",
     } <= offered
     assert {"search_recall", "get_conversation"} <= offered
-    # No shell tool exists, and nothing write-shaped is on the surface.
+    # The surface is no longer read-only: it can write into the Workspace
+    # (containment, not read-only-ness, is the trust model — ADR-0007).
+    # But execution is a LATER issue: no shell/run_command/exec yet.
     assert "shell" not in offered
     assert not any(
         bad in name
         for name in offered
-        for bad in ("write", "exec", "delete", "shell")
+        for bad in ("exec", "delete", "shell", "run_command")
     )

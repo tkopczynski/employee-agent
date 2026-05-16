@@ -17,14 +17,14 @@ import logging
 from .compactor import Compactor
 from .recall import Unit
 from .summarizer import Summarizer
-from .tools import ReadOnlyTools
+from .tools import LocalTools
 from .workspace import Workspace
 
 logger = logging.getLogger("employee_agent.agent")
 
-# The agent-pulled recall surface (PRD Q8). The band-B read-only local tools
-# (file/web/clock) hang off the same loop via ReadOnlyTools — adding them is
-# purely additive: the recall schemas below are unchanged.
+# The agent-pulled recall surface (PRD Q8). The local tools (file/web/clock,
+# plus Workspace-confined write_file) hang off the same loop via LocalTools —
+# adding them is purely additive: the recall schemas below are unchanged.
 RECALL_SCHEMAS = [
     {
         "name": "search_recall",
@@ -64,7 +64,7 @@ class Agent:
         self._store = store
         self._config = config
         self._recall = recall
-        self._tools = ReadOnlyTools(web, Workspace(config.workspace_root))
+        self._tools = LocalTools(web, Workspace(config.workspace_root))
         self._summarizer = Summarizer(llm, config)
         self.conversation_id = store.start_conversation()
         self._compactor = Compactor(

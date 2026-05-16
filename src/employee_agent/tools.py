@@ -1,14 +1,18 @@
-"""The read-only local tool surface (PRD Q9, Issue 05; confined in Issue 01).
+"""The Agent's local tool surface (PRD Q9, Issue 05; confined in Issue 01;
+write added in Issue 02).
 
-These tools never write or cause side effects, so they run with no
-confirmation prompts (read-only ⇒ zero risk). The filesystem tools
-(`read_file`/`list_dir`/`grep`) are confined to the **Workspace**: every path
-is interpreted relative to the Workspace root and routed through the
-`Workspace` airlock, so the Agent has no filesystem reach outside it
-(ADR-0007). A refused path is returned as an ordinary tool result, not a
-crash. Web/clock tools are unchanged; web goes through the thin `WebClient`
-seam. There is deliberately no `shell` tool. This surface hangs off the same
-tool loop as Recall and is independent of it.
+This surface is **no longer read-only**: `write_file` creates/overwrites
+files. It runs with no confirmation prompts not because it is harmless but
+because **containment** bounds the blast radius — every filesystem tool
+(`read_file`/`list_dir`/`grep`/`write_file`) is interpreted Workspace-relative
+and routed through the one `Workspace` airlock, so the Agent can neither read
+nor write anything outside the Workspace (ADR-0007). Prompt-free write is the
+band-C analogue of the band-B "read-only ⇒ zero risk": safe by containment,
+not by being crippled. A refused (escaping) path is returned as an ordinary
+tool result, not a crash. Web/clock tools are unchanged; web goes through the
+thin `WebClient` seam. Execution (`run_command`/`Sandbox`) is a later issue —
+there is no execute tool here yet. This surface hangs off the same tool loop
+as Recall and is independent of it.
 """
 
 import datetime as dt
@@ -27,7 +31,7 @@ _MAX_FILE_BYTES = 64_000
 _MAX_GREP_MATCHES = 200
 
 
-class ReadOnlyTools:
+class LocalTools:
     def __init__(self, web, workspace):
         self._web = web
         self._workspace = workspace
@@ -73,6 +77,21 @@ class ReadOnlyTools:
             },
         },
         {
+            "name": "write_file",
+            "description": (
+                "Create or overwrite a text file at a Workspace-relative "
+                "path with the given content."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["path", "content"],
+            },
+        },
+        {
             "name": "web_search",
             "description": (
                 "Search the web for a query. Returns a list of results, each "
@@ -107,10 +126,11 @@ class ReadOnlyTools:
     ]
 
     def run(self, name: str, tool_input: dict) -> str:
-        # A read-only tool must never crash the Turn — the worst case is a
-        # wasted call, not damage (PRD user story 34). Any failure (a 403, a
-        # missing path, a bad regex) comes back as a result the Agent can
-        # read and react to, just like a successful one.
+        # A tool must never crash the Turn — containment bounds the blast
+        # radius to the Workspace (ADR-0007), so the worst case is a wasted
+        # call, not machine damage. Any failure or airlock refusal (a 403, a
+        # missing path, a bad regex, an escaping write) comes back as a
+        # result the Agent can read and react to, just like a successful one.
         try:
             return self._dispatch(name, tool_input)
         except Exception as exc:  # noqa: BLE001
@@ -123,6 +143,8 @@ class ReadOnlyTools:
             return self._list_dir(tool_input["path"])
         if name == "grep":
             return self._grep(tool_input["pattern"], tool_input["path"])
+        if name == "write_file":
+            return self._write_file(tool_input["path"], tool_input["content"])
         if name == "web_search":
             return self._web_search(tool_input["query"])
         if name == "fetch_url":
@@ -139,6 +161,13 @@ class ReadOnlyTools:
             text = raw[:_MAX_FILE_BYTES].decode("utf-8", errors="replace")
             return f"{text}\n\n[truncated at {_MAX_FILE_BYTES} bytes]"
         return raw.decode("utf-8", errors="replace")
+
+    def _write_file(self, path: str, content: str) -> str:
+        resolved = self._workspace.resolve(path)
+        os.makedirs(resolved.parent, exist_ok=True)
+        with open(resolved, "w", encoding="utf-8") as f:
+            f.write(content)
+        return f"wrote {path}"
 
     def _list_dir(self, path: str) -> str:
         resolved = self._workspace.resolve(path)
