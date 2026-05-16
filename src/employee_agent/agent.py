@@ -12,10 +12,14 @@ only the User input and the final text reply are persisted.
 """
 
 import json
+import logging
 
+from .compactor import Compactor
 from .recall import Unit
 from .summarizer import Summarizer
 from .tools import ReadOnlyTools
+
+logger = logging.getLogger("employee_agent.agent")
 
 # The agent-pulled recall surface (PRD Q8). The band-B read-only local tools
 # (file/web/clock) hang off the same loop via ReadOnlyTools — adding them is
@@ -62,15 +66,32 @@ class Agent:
         self._tools = ReadOnlyTools(web)
         self._summarizer = Summarizer(llm, config)
         self.conversation_id = store.start_conversation()
+        self._compactor = Compactor(
+            self._summarizer, config, self.conversation_id, recall
+        )
         self._next_seq = 0
 
     def send(self, user_input: str) -> str:
         self._store.add_turn(self.conversation_id, self._next_seq, "user", user_input)
         self._next_seq += 1
+        self._compactor.observe("user", user_input)
 
         model = self._config.model_for("agent_loop")
         tools = RECALL_SCHEMAS + self._tools.SCHEMAS
-        messages = [{"role": "user", "content": user_input}]
+        # Hot context (running Summary + verbatim tail) is the cross-Turn
+        # bounded base; it already ends with the just-observed User message.
+        # The tool round-trips below stay loop-local — they are intra-Turn
+        # hot-context mechanics, not Turns, so the Compactor never sees them.
+        messages = self._compactor.hot_context()
+        logger.info(
+            "agent_loop",
+            extra={
+                "conversation_id": self.conversation_id,
+                "task": "agent_loop",
+                "model": model,
+                "hot_context_messages": len(messages),
+            },
+        )
         reply = ""
         for _ in range(_MAX_TOOL_STEPS):
             resp = self._llm.complete(messages, model, tools=tools)
@@ -82,6 +103,7 @@ class Agent:
 
         self._store.add_turn(self.conversation_id, self._next_seq, "agent", reply)
         self._next_seq += 1
+        self._compactor.observe("assistant", reply)
         return reply
 
     def _assistant_message(self, resp) -> dict:
@@ -113,6 +135,17 @@ class Agent:
             # not hardcoded) unless the model asked for a specific size.
             hits = self._recall.search(
                 tool_input["query"], tool_input.get("k")
+            )
+            logger.info(
+                "search_recall",
+                extra={
+                    "conversation_id": self.conversation_id,
+                    "result_hits": len(hits),
+                    "result_tokens": sum(
+                        len(h.summary_line or "") // 4 + len(h.snippet or "") // 4
+                        for h in hits
+                    ),
+                },
             )
             # Recall is seal-scoped (ADR-0005): every hit is necessarily a
             # PAST, finished session, never the current one. Frame it that
@@ -157,13 +190,15 @@ class Agent:
         self._store.seal_conversation(
             self.conversation_id, summary.prose, summary.outcomes
         )
-        self._recall.add_units(self._units_for(turns, summary))
+        self._recall.add_units(self._units_for(summary))
 
-    def _units_for(self, turns, summary):
+    def _units_for(self, summary):
+        # Only the still-hot User Turns are indexed here; the ones compacted
+        # away during the session were already handed to Recall by the
+        # Compactor — so every User Turn is indexed exactly once (ADR-0004).
         units = [
-            Unit(self.conversation_id, "user_turn", t.content, t.seq)
-            for t in turns
-            if t.role == "user"
+            Unit(self.conversation_id, "user_turn", text)
+            for text in self._compactor.hot_user_turns()
         ]
         units += [
             Unit(self.conversation_id, "request", r) for r in summary.requests

@@ -1,6 +1,10 @@
 # 06 — Compaction + cost observability
 
-Status: ready-for-agent
+Status: ready-for-human
+
+> Agent work done (TDD, all acceptance criteria except HITL). Pending: a
+> human tunes the trigger fraction / tail / summary-cap constants against the
+> real model and confirms the cost bound holds before sign-off.
 
 ## Parent
 
@@ -14,13 +18,13 @@ The **Compactor** bounds the live Conversation's hot context (ADR-0003, Q17). Wh
 
 ## Acceptance criteria
 
-- [ ] Hot context never exceeds the configured fraction of the active model's context window across a long Turn stream
-- [ ] The verbatim tail is preserved up to its configured token budget
-- [ ] The running Summary is regenerated to fit its own token cap and does not grow unbounded (the "summary is the leak" failure mode is prevented)
-- [ ] Compacted Turns are written into Recall storage exactly once and stay unsearchable until the Conversation is Sealed
-- [ ] Structured logs record hot-token counts pre/post Compaction, `search_recall` result sizes, and per-task model usage
+- [x] Hot context never exceeds the configured fraction of the active model's context window across a long Turn stream
+- [x] The verbatim tail is preserved up to its configured token budget
+- [x] The running Summary is regenerated to fit its own token cap and does not grow unbounded (the "summary is the leak" failure mode is prevented)
+- [x] Compacted Turns are written into Recall storage exactly once and stay unsearchable until the Conversation is Sealed
+- [x] Structured logs record hot-token counts pre/post Compaction, `search_recall` result sizes, and per-task model usage
 - [ ] HITL sign-off: a human has reviewed the trigger fraction and tail constants against the real model and confirmed the cost bound holds
-- [ ] Tests: **Compactor** (bound holds across a synthetic long session; running-Summary cap enforced; cold Turns handed to Recall exactly once); final end-to-end (long session stays bounded, then Seals and becomes recallable)
+- [x] Tests: **Compactor** (bound holds across a synthetic long session; running-Summary cap enforced; cold Turns handed to Recall exactly once); final end-to-end (long session stays bounded, then Seals and becomes recallable)
 
 ## Blocked by
 

@@ -7,6 +7,7 @@ tests can assert which model the agent loop resolved.
 
 
 from employee_agent.llm import Response, ToolCall
+from employee_agent.summarizer import Summary
 from employee_agent.web import SearchResult
 
 
@@ -52,6 +53,35 @@ class FakeWebClient:
     def fetch(self, url):
         self.fetched.append(url)
         return self._pages.get(url, "")
+
+
+class FakeSummarizer:
+    """Deterministic Summarizer double for Compactor tests (Issue 06).
+
+    `prose_for` is called with the turns it was asked to summarise and returns
+    the running-Summary prose, so a test can make the prose grow without bound
+    to exercise the running-Summary cap. Records every call's turns so a test
+    can assert what was folded into each regeneration. Defaults to a short
+    constant recap (the common case)."""
+
+    def __init__(self, prose_for=None):
+        self._prose_for = prose_for or (lambda turns: "recap")
+        self.calls = []  # list of the turns lists it was asked to summarise
+
+    def summarize(self, turns) -> Summary:
+        self.calls.append(list(turns))
+        return Summary(prose=self._prose_for(turns), requests=[], outcomes=[])
+
+
+class FakeRecall:
+    """Recall double that records the Units handed to it (Issue 06), so a test
+    can assert compacted Turns are written to Recall storage exactly once."""
+
+    def __init__(self):
+        self.added = []  # flat list of every Unit passed to add_units
+
+    def add_units(self, units):
+        self.added.extend(units)
 
 
 class TopicEmbedder:

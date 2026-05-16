@@ -18,13 +18,27 @@ class Config:
     # measurable.
     DEFAULT_RECALL = {"k": 6, "token_ceiling": 2000, "rrf_k": 60}
 
+    # Compaction budgets (PRD/ADR-0003): trigger when hot context exceeds a
+    # fraction of the active model's context window; keep a verbatim Turn tail
+    # and a running Summary, each under its own cap so the bound cannot leak.
+    # Overridable so a human can tune the constants against the real model
+    # (the HITL step) and the cost bound stays measurable.
+    DEFAULT_COMPACTION = {
+        "context_window": 200_000,
+        "trigger_fraction": 0.5,
+        "tail_token_budget": 4000,
+        "summary_token_cap": 2000,
+    }
+
     def __init__(
         self,
         models: dict[str, str] | None = None,
         recall: dict[str, int] | None = None,
+        compaction: dict | None = None,
     ):
         self._models = {**self.DEFAULT_MODELS, **(models or {})}
         self._recall = {**self.DEFAULT_RECALL, **(recall or {})}
+        self._compaction = {**self.DEFAULT_COMPACTION, **(compaction or {})}
 
     def model_for(self, task: str) -> str:
         return self._models[task]
@@ -40,3 +54,19 @@ class Config:
     @property
     def rrf_k(self) -> int:
         return self._recall["rrf_k"]
+
+    @property
+    def compaction_context_window(self) -> int:
+        return self._compaction["context_window"]
+
+    @property
+    def compaction_trigger_fraction(self) -> float:
+        return self._compaction["trigger_fraction"]
+
+    @property
+    def compaction_tail_token_budget(self) -> int:
+        return self._compaction["tail_token_budget"]
+
+    @property
+    def compaction_summary_token_cap(self) -> int:
+        return self._compaction["summary_token_cap"]
