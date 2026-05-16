@@ -1,3 +1,8 @@
+## Development
+
+- Run tests with `uv run pytest`.
+- Work directly on the `master` branch — no feature branches needed.
+
 ## Agent skills
 
 ### Issue tracker
