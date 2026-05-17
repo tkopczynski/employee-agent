@@ -16,6 +16,9 @@ employee-agent = "employee_agent.__main__:main"
 [dependency-groups]
 dev = [
     "pytest",
+    # Read only by the retrieval eval (ADR-0008); the Agent runtime never
+    # parses the dataset, so this is dev-only, never a runtime dependency.
+    "pyyaml",
 ]
 
 [build-system]
@@ -27,6 +30,9 @@ packages = ["src/employee_agent"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Repo root on sys.path so the hermetic scoring test can `import evals`.
+# `evals/` is a dev-only instrument, never shipped in the wheel.
+pythonpath = ["."]
 addopts = "-q"
 markers = [
     "docker: real-Docker integration test (ADR-0007); skipped when no Docker daemon is reachable",

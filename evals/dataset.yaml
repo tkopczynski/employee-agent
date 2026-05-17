@@ -1,0 +1,67 @@
+# Seed dataset for the retrieval-quality eval (Issue 01 — the tracer bullet).
+#
+# Deliberately tiny: it exists to prove the whole pipeline end-to-end, not to
+# be the honest, discriminating corpus — that is Issue 02, which replaces this
+# file with ~20 Conversations / ~35 probes authored to the ADR-0008 contract
+# and an empirically calibrated floor. The floor below is set a small margin
+# under this seed's first observed run (the empirical-floor procedure), so the
+# tracer PASSes while the machinery is what is under test.
+
+floor:
+  recall_at_k: 0.75   # overall recall@recall_k must be >= this
+  hit_at_1: 0.75      # overall hit@1 must be >= this
+
+conversations:
+  - id: 1
+    topic: "Q1 revenue report"
+    turns:
+      - { role: user,  text: "Can you prepare the Q1 revenue report by Friday?" }
+      - { role: agent, text: "Sure, I'll draft the Q1 revenue report and have it ready by Friday." }
+    golden:
+      requests: ["Prepare the Q1 revenue report by Friday"]
+      summary: "The User asked the Agent to prepare the Q1 revenue report by Friday; the Agent agreed to draft it."
+      outcomes: ["Q1 revenue report drafted"]
+
+  - id: 2
+    topic: "Database migration failure ERR_4711"
+    turns:
+      - { role: user,  text: "The deploy failed with ERR_4711 during the database migration. Can you investigate?" }
+      - { role: agent, text: "Looking into ERR_4711 now; it appears during the schema migration step." }
+    golden:
+      requests: ["Investigate the ERR_4711 failure in the database migration"]
+      summary: "The User reported the deploy failing with ERR_4711 during the database migration and asked the Agent to investigate."
+      outcomes: ["Root-caused ERR_4711 to a missing index on the migration table"]
+
+  - id: 3
+    topic: "Autumn trip to Japan"
+    turns:
+      - { role: user,  text: "Help me plan a two week trip to Japan in autumn." }
+      - { role: agent, text: "I'd suggest Tokyo, Kyoto, and Hakone over two weeks in autumn." }
+    golden:
+      requests: ["Plan a two week autumn trip to Japan"]
+      summary: "The User asked the Agent to help plan a two week autumn trip to Japan; the Agent proposed Tokyo, Kyoto, and Hakone."
+      outcomes: ["Drafted a Tokyo to Kyoto to Hakone itinerary"]
+
+probes:
+  # Semantic: shares almost no content words with conversation 1's Units;
+  # only meaning connects (exercises the embedder, US-19).
+  - query: "when did I ask you to put together the quarterly earnings writeup"
+    arm: semantic
+    expect_conversation: 1
+
+  # Semantic: "fortnight holiday in the far east" vs "two week trip to Japan
+  # in autumn" — lexically disjoint, semantically the same request (US-19).
+  - query: "remind me about the fortnight holiday somewhere in the far east"
+    arm: semantic
+    expect_conversation: 3
+
+  # Keyword: a rare exact token the User would recall verbatim; it appears
+  # only in conversation 2 (US-20).
+  - query: "ERR_4711"
+    arm: keyword
+    expect_conversation: 2
+
+  # Keyword: the exact phrase used in conversation 1.
+  - query: "Q1 revenue report"
+    arm: keyword
+    expect_conversation: 1
