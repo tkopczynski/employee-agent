@@ -1,67 +1,385 @@
-# Seed dataset for the retrieval-quality eval (Issue 01 — the tracer bullet).
+# Retrieval-quality eval corpus (Issue 02 — the honest, discriminating corpus).
 #
-# Deliberately tiny: it exists to prove the whole pipeline end-to-end, not to
-# be the honest, discriminating corpus — that is Issue 02, which replaces this
-# file with ~20 Conversations / ~35 probes authored to the ADR-0008 contract
-# and an empirically calibrated floor. The floor below is set a small margin
-# under this seed's first observed run (the empirical-floor procedure), so the
-# tracer PASSes while the machinery is what is under test.
+# Authored to the ADR-0008 honesty contract (the eval is only as good as this):
+#
+#   * Semantic probes share ZERO content words with their target Conversation's
+#     indexed Units (every user Turn + every golden request + the golden summary
+#     prose — exactly what runner._units_for indexes; agent Turns and outcomes
+#     are NOT indexed, so they do not constrain a probe). Only meaning connects,
+#     so the semantic arm is genuinely exercised (US-19).
+#   * Keyword probes hinge on a rare exact token the User would recall verbatim
+#     (an error code, a project codename). A sibling *distractor* Conversation
+#     discusses the same topic in paraphrase but never uses that exact token, so
+#     only the keyword arm can disambiguate (US-20): ERR_4711 (conv 4) vs the
+#     token-free paraphrase (conv 6); "Project Halibut" (conv 19) vs the
+#     codename-free initiative (conv 20).
+#   * Distractor clusters are >=2 sibling topics so a probe must resolve to one
+#     specific Conversation — ranking under test, not mere topical match:
+#     quarterly reports (1-3), deploy/migration incidents (4-6), trips (7-9),
+#     hiring (10-12), infra tuning (13-15), personal admin (16-18), internal
+#     initiatives (19-20).
+#
+# Probe queries are deliberately punctuation-free word sequences: the Agent
+# feeds the LLM's raw query straight into FTS5 MATCH (no sanitisation), where
+# '-' and ';' are query metacharacters. This is the same query shape as the
+# Issue 01 seed and the spec schema; it does not touch the honesty contract
+# (content words are identical with or without the hyphen — only meaning, never
+# a shared token, connects a semantic probe to its target).
+#
+# ids are 1..20 contiguous: the corpus is built in id order into a fresh
+# SQLite, so an authored id equals the Store-assigned conversation_id (the
+# loader/runner id-invariant) and a probe's expected Conversation is
+# unambiguous.
+#
+# The floor is empirical (ADR-0008): set ~0.05-0.10 below the first observed
+# real-embedder run so the run PASSes and the threshold reflects reality, not
+# an aspiration. Re-tune by hand as the corpus or the knobs change.
+#
+# First observed run (BAAI/bge-small-en-v1.5, recall_k=6, rrf_k=60):
+# overall recall@k=1.00, hit@1=0.97 (keyword 1.00/1.00, semantic 1.00/0.95 —
+# the lone non-rank-1 row is the conv-4/conv-6 keyword cluster, where only the
+# ERR_4711 keyword probe can disambiguate, by design). Floor set a ~0.10 / ~0.09
+# margin below those so embedder jitter or a corpus tweak does not false-fail.
 
 floor:
-  recall_at_k: 0.75   # overall recall@recall_k must be >= this
-  hit_at_1: 0.75      # overall hit@1 must be >= this
+  recall_at_k: 0.90   # observed 1.00 — overall recall@recall_k must be >= this
+  hit_at_1: 0.88      # observed 0.97 — overall hit@1 must be >= this
 
 conversations:
+  # --- Cluster A: quarterly reports (1-3) — ranking distractors -------------
   - id: 1
     topic: "Q1 revenue report"
     turns:
       - { role: user,  text: "Can you prepare the Q1 revenue report by Friday?" }
-      - { role: agent, text: "Sure, I'll draft the Q1 revenue report and have it ready by Friday." }
+      - { role: agent, text: "On it — I'll have the Q1 revenue numbers drafted by Friday." }
     golden:
       requests: ["Prepare the Q1 revenue report by Friday"]
-      summary: "The User asked the Agent to prepare the Q1 revenue report by Friday; the Agent agreed to draft it."
+      summary: "Prepare the Q1 revenue report by Friday."
       outcomes: ["Q1 revenue report drafted"]
 
   - id: 2
-    topic: "Database migration failure ERR_4711"
+    topic: "Q3 headcount report"
     turns:
-      - { role: user,  text: "The deploy failed with ERR_4711 during the database migration. Can you investigate?" }
-      - { role: agent, text: "Looking into ERR_4711 now; it appears during the schema migration step." }
+      - { role: user,  text: "I need the Q3 headcount report for the board on Monday." }
+      - { role: agent, text: "Understood — Q3 headcount report for the board, ready Monday." }
     golden:
-      requests: ["Investigate the ERR_4711 failure in the database migration"]
-      summary: "The User reported the deploy failing with ERR_4711 during the database migration and asked the Agent to investigate."
-      outcomes: ["Root-caused ERR_4711 to a missing index on the migration table"]
+      requests: ["Produce the Q3 headcount report for the board by Monday"]
+      summary: "Produce the Q3 headcount report for the board by Monday."
+      outcomes: ["Q3 headcount report produced"]
 
   - id: 3
+    topic: "Competitor teardown report"
+    turns:
+      - { role: user,  text: "Put together a competitor teardown report on Acme before the offsite." }
+      - { role: agent, text: "Will do — a teardown of Acme ahead of the offsite." }
+    golden:
+      requests: ["Compile a competitor teardown report on Acme before the offsite"]
+      summary: "Compile a competitor teardown report on Acme before the offsite."
+      outcomes: ["Competitor teardown of Acme compiled"]
+
+  # --- Cluster B: deploy/migration incidents (4-6) — keyword cluster --------
+  # conv 4 carries the rare token ERR_4711; conv 6 paraphrases the SAME
+  # incident topic but never uses it, so only the keyword arm separates them.
+  - id: 4
+    topic: "Database migration failed with ERR_4711"
+    turns:
+      - { role: user,  text: "The deploy failed with ERR_4711 during the database migration. Can you investigate?" }
+      - { role: agent, text: "Looking into ERR_4711 in the migration step now." }
+    golden:
+      requests: ["Investigate the ERR_4711 failure in the database migration"]
+      summary: "Investigate the ERR_4711 failure during the database migration."
+      outcomes: ["Root-caused ERR_4711 to a missing index on the migration table"]
+
+  - id: 5
+    topic: "Payment service PAYSVC-502 errors"
+    turns:
+      - { role: user,  text: "Checkout is throwing PAYSVC-502 from the payment service. Please dig in." }
+      - { role: agent, text: "On it — chasing down PAYSVC-502 in the payment path." }
+    golden:
+      requests: ["Investigate the PAYSVC-502 errors from the payment service"]
+      summary: "Investigate the PAYSVC-502 errors coming from the payment service at checkout."
+      outcomes: ["Traced PAYSVC-502 to an expired upstream certificate"]
+
+  - id: 6
+    topic: "Schema rollout stalled the release (paraphrase distractor, no code)"
+    turns:
+      - { role: user,  text: "Our schema rollout broke the population step last night and the release stalled. Help me sort it." }
+      - { role: agent, text: "Let's untangle the stalled release and the broken population step." }
+    golden:
+      requests: ["Fix the broken schema rollout that stalled the release"]
+      summary: "The schema rollout broke the population step and stalled the release overnight."
+      outcomes: ["Recovered the stalled release after fixing the population step"]
+
+  # --- Cluster C: trips (7-9) — semantic ranking distractors ---------------
+  - id: 7
     topic: "Autumn trip to Japan"
     turns:
       - { role: user,  text: "Help me plan a two week trip to Japan in autumn." }
-      - { role: agent, text: "I'd suggest Tokyo, Kyoto, and Hakone over two weeks in autumn." }
+      - { role: agent, text: "Tokyo, Kyoto, and Hakone over two weeks in autumn — sound good?" }
     golden:
       requests: ["Plan a two week autumn trip to Japan"]
-      summary: "The User asked the Agent to help plan a two week autumn trip to Japan; the Agent proposed Tokyo, Kyoto, and Hakone."
-      outcomes: ["Drafted a Tokyo to Kyoto to Hakone itinerary"]
+      summary: "Plan a two week autumn trip to Japan."
+      outcomes: ["Drafted a Tokyo-Kyoto-Hakone itinerary"]
+
+  - id: 8
+    topic: "Surf trip to Portugal"
+    turns:
+      - { role: user,  text: "I want to organise a surfing holiday along the Portuguese coast in June." }
+      - { role: agent, text: "Ericeira and Sagres in June would be ideal for surf." }
+    golden:
+      requests: ["Organise a June surfing holiday on the Portuguese coast"]
+      summary: "Organise a surfing holiday along the Portuguese coast in June."
+      outcomes: ["Sketched an Ericeira-Sagres surf plan"]
+
+  - id: 9
+    topic: "Iceland ring-road drive"
+    turns:
+      - { role: user,  text: "Sort out a self-drive loop around Iceland for several weeks next spring." }
+      - { role: agent, text: "The ring road over a few weeks next spring works well." }
+    golden:
+      requests: ["Arrange a self-drive loop around Iceland next spring"]
+      summary: "Arrange a self-drive loop around Iceland next spring."
+      outcomes: ["Built a ring-road driving schedule"]
+
+  # --- Cluster D: hiring decisions (10-12) ---------------------------------
+  - id: 10
+    topic: "Hire a senior backend engineer"
+    turns:
+      - { role: user,  text: "We should open a role for a senior backend engineer this quarter." }
+      - { role: agent, text: "I'll draft the senior backend engineer opening." }
+    golden:
+      requests: ["Open a senior backend engineer role this quarter"]
+      summary: "Open a senior backend engineer role this quarter."
+      outcomes: ["Backend engineer job description drafted"]
+
+  - id: 11
+    topic: "Hire a product designer"
+    turns:
+      - { role: user,  text: "Let's recruit a product designer to own the mobile experience." }
+      - { role: agent, text: "Sure — a product designer focused on mobile." }
+    golden:
+      requests: ["Recruit a product designer for the mobile experience"]
+      summary: "Recruit a product designer to own the mobile experience."
+      outcomes: ["Designer search kicked off"]
+
+  - id: 12
+    topic: "Contractor vs full-time for the data role"
+    turns:
+      - { role: user,  text: "Should the new data analytics position be a contractor or a full-time hire?" }
+      - { role: agent, text: "Trade-offs: a contractor is faster; full-time builds continuity." }
+    golden:
+      requests: ["Decide whether the data analytics position is contractor or full-time"]
+      summary: "Decide whether the new data analytics position should be a contractor or a full-time hire."
+      outcomes: ["Chose a full-time data analytics hire"]
+
+  # --- Cluster E: infra / performance tuning (13-15) -----------------------
+  - id: 13
+    topic: "Postgres connection pool exhaustion"
+    turns:
+      - { role: user,  text: "The Postgres connection pool keeps getting exhausted under load. Can you tune it?" }
+      - { role: agent, text: "I'll resize the pool and add timeouts." }
+    golden:
+      requests: ["Tune the exhausted Postgres connection pool under load"]
+      summary: "Tune the Postgres connection pool that keeps getting exhausted under load."
+      outcomes: ["Raised pool size and added connection timeouts"]
+
+  - id: 14
+    topic: "Redis cache eviction policy"
+    turns:
+      - { role: user,  text: "Change the Redis cache eviction policy; we're evicting hot keys too aggressively." }
+      - { role: agent, text: "Switching to an LFU-style policy should protect the hot keys." }
+    golden:
+      requests: ["Change the Redis cache eviction policy that drops hot keys"]
+      summary: "Change the Redis cache eviction policy that is dropping hot keys too aggressively."
+      outcomes: ["Moved Redis to an LFU eviction policy"]
+
+  - id: 15
+    topic: "Kafka consumer lag"
+    turns:
+      - { role: user,  text: "Kafka consumer lag is spiking; please rebalance the partitions." }
+      - { role: agent, text: "I'll rebalance partitions and scale the consumer group." }
+    golden:
+      requests: ["Fix the spiking Kafka consumer lag by rebalancing partitions"]
+      summary: "Fix the spiking Kafka consumer lag by rebalancing the partitions."
+      outcomes: ["Rebalanced partitions and added consumers"]
+
+  # --- Cluster F: personal admin (16-18) -----------------------------------
+  - id: 16
+    topic: "Dentist appointment"
+    turns:
+      - { role: user,  text: "Book me a dentist appointment for a cleaning sometime next week." }
+      - { role: agent, text: "I'll find a dental cleaning slot next week." }
+    golden:
+      requests: ["Book a dentist cleaning appointment next week"]
+      summary: "Book a dentist appointment for a cleaning next week."
+      outcomes: ["Dentist cleaning booked for Thursday"]
+
+  - id: 17
+    topic: "Passport renewal"
+    turns:
+      - { role: user,  text: "My passport expires in two months — get the renewal started before our holiday." }
+      - { role: agent, text: "I'll begin the passport renewal right away." }
+    golden:
+      requests: ["Start the passport renewal before the holiday deadline"]
+      summary: "Start the passport renewal before it expires ahead of the holiday."
+      outcomes: ["Passport renewal application submitted"]
+
+  - id: 18
+    topic: "Car annual service"
+    turns:
+      - { role: user,  text: "Schedule the car in for its annual service and an oil change." }
+      - { role: agent, text: "I'll book the annual service and the oil change." }
+    golden:
+      requests: ["Schedule the car's annual service and oil change"]
+      summary: "Schedule the car for its annual service and an oil change."
+      outcomes: ["Car service booked at the dealership"]
+
+  # --- Cluster G: internal initiatives (19-20) — keyword cluster -----------
+  # conv 19 carries the codename "Project Halibut"; conv 20 is the same kind
+  # of internal-initiative kickoff but never uses the codename.
+  - id: 19
+    topic: "Project Halibut kickoff"
+    turns:
+      - { role: user,  text: "Kick off Project Halibut and line up the launch milestones." }
+      - { role: agent, text: "Project Halibut kickoff scheduled; milestones drafted." }
+    golden:
+      requests: ["Kick off Project Halibut and set the launch milestones"]
+      summary: "Kick off Project Halibut and line up its launch milestones."
+      outcomes: ["Project Halibut milestones approved"]
+
+  - id: 20
+    topic: "Onboarding overhaul initiative (codename-free distractor)"
+    turns:
+      - { role: user,  text: "Spin up the new internal initiative to overhaul how new hires get ramped." }
+      - { role: agent, text: "I'll plan the onboarding overhaul programme." }
+    golden:
+      requests: ["Start the internal initiative to overhaul new-hire ramp-up"]
+      summary: "Start a new internal initiative to overhaul how new hires are ramped up."
+      outcomes: ["Onboarding overhaul initiative chartered"]
 
 probes:
-  # Semantic: shares almost no content words with conversation 1's Units;
-  # only meaning connects (exercises the embedder, US-19).
-  - query: "when did I ask you to put together the quarterly earnings writeup"
+  # ===== Semantic probes (22) — zero content words shared with the target ===
+  # Each query is a full paraphrase: only meaning, never a shared token,
+  # connects it to its expected Conversation (US-19). Distractor siblings make
+  # this ranking, not topical presence.
+
+  - query: "remind me when I wanted that opening quarter earnings breakdown finished before the weekend"
     arm: semantic
     expect_conversation: 1
-
-  # Semantic: "fortnight holiday in the far east" vs "two week trip to Japan
-  # in autumn" — lexically disjoint, semantically the same request (US-19).
-  - query: "remind me about the fortnight holiday somewhere in the far east"
+  - query: "what was that third quarter staffing numbers writeup the directors wanted at the start of the week"
+    arm: semantic
+    expect_conversation: 2
+  - query: "pull the autumn period staffing tally for the trustees"
+    arm: semantic
+    expect_conversation: 2
+  - query: "pull apart how that rival firm operates before the team retreat"
     arm: semantic
     expect_conversation: 3
 
-  # Keyword: a rare exact token the User would recall verbatim; it appears
-  # only in conversation 2 (US-20).
+  - query: "look into why last weeks schema upgrade rollout blew up in production"
+    arm: semantic
+    expect_conversation: 4
+  - query: "figure out why the billing flow keeps rejecting customer transactions"
+    arm: semantic
+    expect_conversation: 5
+  - query: "the early morning incident where the data import phase choked and froze the whole deployment"
+    arm: semantic
+    expect_conversation: 6
+
+  - query: "remind me about the fortnight getaway across the far eastern archipelago in the fall"
+    arm: semantic
+    expect_conversation: 7
+  - query: "the fourteen day excursion to the land of the rising sun during leaf season"
+    arm: semantic
+    expect_conversation: 7
+  - query: "set up that midsummer wave riding break on the Iberian shoreline"
+    arm: semantic
+    expect_conversation: 8
+  - query: "the multi night circular motoring tour of the volcanic Nordic island I lined up for the thaw"
+    arm: semantic
+    expect_conversation: 9
+
+  - query: "when did I bring up creating a high level server side developer slot this period"
+    arm: semantic
+    expect_conversation: 10
+  - query: "find someone to lead the look and feel of our handheld app"
+    arm: semantic
+    expect_conversation: 11
+  - query: "were we leaning toward a freelancer or a permanent staffer for that metrics seat"
+    arm: semantic
+    expect_conversation: 12
+
+  - query: "the relational database running out of free sessions when traffic surges"
+    arm: semantic
+    expect_conversation: 13
+  - query: "stop the in memory store from discarding frequently used entries so quickly"
+    arm: semantic
+    expect_conversation: 14
+  - query: "the message queue readers are falling behind even out the shards"
+    arm: semantic
+    expect_conversation: 15
+
+  - query: "get me a slot with the tooth doctor for a scale and polish in the coming days"
+    arm: semantic
+    expect_conversation: 16
+  - query: "sort the travel document reissue out well in advance of our vacation"
+    arm: semantic
+    expect_conversation: 17
+  - query: "line up the yearly maintenance and lubricant swap for the vehicle"
+    arm: semantic
+    expect_conversation: 18
+
+  - query: "remind me about commencing that programme and laying out its go live checkpoints"
+    arm: semantic
+    expect_conversation: 19
+  - query: "the effort to rework how fresh employees are brought aboard"
+    arm: semantic
+    expect_conversation: 20
+
+  # ===== Keyword probes (13) — hinge on a rare exact token =================
+  # The discriminating pair: ERR_4711 / PAYSVC 502 / "Project Halibut" appear
+  # verbatim only in their target; sibling distractors (conv 6, conv 20)
+  # paraphrase the same topic without the token, so only the keyword arm
+  # resolves them (US-20). The remaining keyword probes are exact phrases the
+  # User would recall, where sibling reports/trips/infra force ranking.
+
   - query: "ERR_4711"
     arm: keyword
-    expect_conversation: 2
+    expect_conversation: 4
+  - query: "investigate the ERR_4711 migration failure"
+    arm: keyword
+    expect_conversation: 4
+  - query: "PAYSVC 502"
+    arm: keyword
+    expect_conversation: 5
+  - query: "PAYSVC 502 payment service"
+    arm: keyword
+    expect_conversation: 5
+  - query: "Project Halibut"
+    arm: keyword
+    expect_conversation: 19
+  - query: "kick off Project Halibut milestones"
+    arm: keyword
+    expect_conversation: 19
 
-  # Keyword: the exact phrase used in conversation 1.
   - query: "Q1 revenue report"
     arm: keyword
     expect_conversation: 1
+  - query: "Q3 headcount report"
+    arm: keyword
+    expect_conversation: 2
+  - query: "competitor teardown report Acme"
+    arm: keyword
+    expect_conversation: 3
+  - query: "two week trip to Japan in autumn"
+    arm: keyword
+    expect_conversation: 7
+  - query: "Postgres connection pool exhausted"
+    arm: keyword
+    expect_conversation: 13
+  - query: "Kafka consumer lag partitions"
+    arm: keyword
+    expect_conversation: 15
+  - query: "Redis cache eviction policy"
+    arm: keyword
+    expect_conversation: 14
