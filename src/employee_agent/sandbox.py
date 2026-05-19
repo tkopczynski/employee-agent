@@ -33,6 +33,18 @@ class ExecResult:
     timed_out: bool
 
 
+def _as_text(raw: bytes | str | None) -> str:
+    # A timed-out subprocess surfaces its partial output as bytes (even under
+    # text=True), and may capture nothing at all. ExecResult.stdout/stderr are
+    # str by contract, so decode defensively — same lenient decode as the
+    # read_file tool, so a timed-out command's output is never corrupting.
+    if raw is None:
+        return ""
+    if isinstance(raw, bytes):
+        return raw.decode("utf-8", errors="replace")
+    return raw
+
+
 class Sandbox(Protocol):
     def run(self, command: str, timeout: float) -> ExecResult: ...
 
@@ -94,8 +106,8 @@ class DockerSandbox:
                 ["docker", "rm", "--force", name], capture_output=True
             )
             return ExecResult(
-                stdout=exc.stdout or "",
-                stderr=exc.stderr or "",
+                stdout=_as_text(exc.stdout),
+                stderr=_as_text(exc.stderr),
                 exit_code=-1,
                 timed_out=True,
             )
