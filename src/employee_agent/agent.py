@@ -15,9 +15,14 @@ import json
 import logging
 
 from .compactor import Compactor
-from .recall import Unit
+from .config import Config
+from .llm import LLMClient
+from .recall import Recall, Unit
+from .sandbox import Sandbox
+from .store import Store
 from .summarizer import Summarizer
 from .tools import LocalTools
+from .web import WebClient
 from .workspace import Workspace
 
 logger = logging.getLogger("employee_agent.agent")
@@ -60,7 +65,19 @@ _MAX_TOOL_STEPS = 8  # bound the loop — runaway tool use is a cost hazard
 
 
 class Agent:
-    def __init__(self, llm, store, config, recall, web=None, sandbox=None):
+    def __init__(
+        self,
+        llm: LLMClient,
+        store: Store,
+        config: Config,
+        # Concrete `Recall`, not a Protocol: the Agent never substitutes a Fake
+        # here (it always holds the real Recall), so the seam convention
+        # annotates it with the concrete class. The Compactor — which *does*
+        # get a `FakeRecall` — sees the narrow `RecallSink` Protocol instead.
+        recall: Recall,
+        web: WebClient | None = None,
+        sandbox: Sandbox | None = None,
+    ):
         self._llm = llm
         self._store = store
         self._config = config

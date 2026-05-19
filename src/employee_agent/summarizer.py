@@ -12,6 +12,7 @@ strong Recall match instead of being buried in prose.
 
 import json
 from dataclasses import dataclass
+from typing import Protocol
 
 _PROMPT = """\
 Summarise this finished Conversation between a User and an Agent.
@@ -31,6 +32,15 @@ class Summary:
     prose: str
     requests: list[str]
     outcomes: list[str]
+
+
+# The one-method seam the Compactor depends on. It exists only because a Fake
+# double is substituted (`FakeSummarizer`): ty checks it and the concrete
+# `Summarizer` against this Protocol, so a Fake drifting from the real seam is
+# a type error. `turns` stays unannotated to match the concrete signature —
+# callers pass Store Turns or transient `_Msg`s interchangeably.
+class SummarizerLike(Protocol):
+    def summarize(self, turns) -> Summary: ...
 
 
 class Summarizer:

@@ -18,8 +18,13 @@ import datetime as dt
 import sqlite3
 import threading
 from dataclasses import dataclass
+from typing import Protocol
 
 import sqlite_vec
+
+from .config import Config
+from .embedder import Embedder
+from .store import Store
 
 
 def _now_iso() -> str:
@@ -53,8 +58,18 @@ class Hit:
     snippet: str
 
 
+# The one-method seam the Compactor depends on: where compacted (cold) User
+# Turns are written. Narrow by design — the Compactor only *writes* units;
+# `search`/`get_conversation` are the Agent's surface, and the Agent always
+# holds a concrete `Recall`, never a Fake, so that side stays concrete. This
+# Protocol exists only because a Fake double is substituted (`FakeRecall`):
+# the concrete `Recall` also satisfies it, so a Fake drifting is a type error.
+class RecallSink(Protocol):
+    def add_units(self, units: list[Unit]) -> None: ...
+
+
 class Recall:
-    def __init__(self, store, embedder, config):
+    def __init__(self, store: Store, embedder: Embedder, config: Config):
         self._store = store
         self._embedder = embedder
         self._config = config

@@ -1,6 +1,8 @@
 ## Development
 
 - Run tests with `uv run pytest`.
+- Type-check with `uv run ty check` (ty is pinned in dev deps; ADR-0009).
+  Whole-repo zero-baseline — not gated in pytest/CI, so run it before landing.
 - Work directly on the `master` branch — no feature branches needed.
 
 ## Agent skills

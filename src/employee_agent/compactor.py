@@ -19,7 +19,9 @@ bound can be watched holding against a real model.
 import logging
 from dataclasses import dataclass
 
-from .recall import Unit
+from .config import Config
+from .recall import RecallSink, Unit
+from .summarizer import SummarizerLike
 
 logger = logging.getLogger("employee_agent.compactor")
 
@@ -47,7 +49,15 @@ class _Msg:
 
 
 class Compactor:
-    def __init__(self, summarizer, config, conversation_id, recall, *, token_counter=None):
+    def __init__(
+        self,
+        summarizer: SummarizerLike,
+        config: Config,
+        conversation_id,
+        recall: RecallSink,
+        *,
+        token_counter=None,
+    ):
         self._summarizer = summarizer
         self._config = config
         self._conversation_id = conversation_id
