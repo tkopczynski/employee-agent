@@ -18,7 +18,7 @@ class ChatApp(App):
     Input { dock: bottom; }
     """
 
-    def __init__(self, agent: Agent):
+    def __init__(self, agent: Agent) -> None:
         super().__init__()
         self._agent = agent
 

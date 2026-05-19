@@ -27,7 +27,9 @@ import os
 import re
 import time
 
-from .workspace import WorkspaceError
+from .sandbox import Sandbox
+from .web import WebClient
+from .workspace import Workspace, WorkspaceError
 
 logger = logging.getLogger("employee_agent.tools")
 
@@ -41,7 +43,13 @@ _MAX_GREP_MATCHES = 200
 
 
 class LocalTools:
-    def __init__(self, web, workspace, sandbox=None, command_timeout=30):
+    def __init__(
+        self,
+        web: WebClient | None,
+        workspace: Workspace,
+        sandbox: Sandbox | None = None,
+        command_timeout: float = 30,
+    ) -> None:
         self._web = web
         self._workspace = workspace
         self._sandbox = sandbox
@@ -175,7 +183,7 @@ class LocalTools:
         if name == "web_search":
             return self._web_search(tool_input["query"])
         if name == "fetch_url":
-            return self._web.fetch(tool_input["url"])
+            return self._fetch_url(tool_input["url"])
         if name == "current_time":
             return dt.datetime.now(dt.timezone.utc).isoformat()
         return f"unknown tool: {name}"
@@ -273,8 +281,20 @@ class LocalTools:
                 continue
         return "\n".join(matches)
 
+    # An Agent can be constructed without a WebClient; the web tools are still
+    # offered, so invoking one unwired must be a clean, intentional tool-level
+    # result, not an AttributeError on a None seam that leaks out and corrupts
+    # the Turn (the same latent-bug family as run_command, ADR-0009 / Issue
+    # 02). These guards are also what makes `_web: WebClient | None` honest.
     def _web_search(self, query: str) -> str:
+        if self._web is None:
+            return "web_search unavailable: no web client is configured for this Agent"
         results = self._web.search(query)
         return json.dumps(
             [{"title": r.title, "url": r.url, "snippet": r.snippet} for r in results]
         )
+
+    def _fetch_url(self, url: str) -> str:
+        if self._web is None:
+            return "fetch_url unavailable: no web client is configured for this Agent"
+        return self._web.fetch(url)

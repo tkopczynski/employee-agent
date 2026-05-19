@@ -32,7 +32,7 @@ class LLMClient(Protocol):
 
 
 class AnthropicLLMClient:
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None) -> None:
         from anthropic import Anthropic
 
         self._client = Anthropic(api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"))

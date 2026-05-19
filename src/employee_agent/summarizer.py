@@ -14,6 +14,9 @@ import json
 from dataclasses import dataclass
 from typing import Protocol
 
+from .config import Config
+from .llm import LLMClient
+
 _PROMPT = """\
 Summarise this finished Conversation between a User and an Agent.
 
@@ -44,7 +47,7 @@ class SummarizerLike(Protocol):
 
 
 class Summarizer:
-    def __init__(self, llm, config):
+    def __init__(self, llm: LLMClient, config: Config) -> None:
         self._llm = llm
         self._config = config
 
@@ -67,7 +70,7 @@ class Summarizer:
             return Summary(prose=reply.strip(), requests=[], outcomes=[])
 
 
-def _normalise(value) -> list[str]:
+def _normalise(value: object) -> list[str]:
     """Discrete, normalised entries (ADR-0006): strip, drop empties, dedupe
     keeping first occurrence and order."""
     if not isinstance(value, list):

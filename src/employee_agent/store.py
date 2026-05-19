@@ -11,6 +11,7 @@ import json
 import sqlite3
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 
 
 def _now_iso() -> str:
@@ -35,7 +36,7 @@ class Turn:
 
 
 class Store:
-    def __init__(self, db_path):
+    def __init__(self, db_path: str | Path) -> None:
         # The TUI runs the agent loop on a Textual worker thread, so the
         # connection is shared across threads; access is serialised by _lock.
         # db_path is public so Recall can open the same single SQLite file

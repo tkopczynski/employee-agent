@@ -16,11 +16,11 @@ import logging
 
 from .compactor import Compactor
 from .config import Config
-from .llm import LLMClient
+from .llm import LLMClient, Response, ToolCall
 from .recall import Recall, Unit
 from .sandbox import Sandbox
 from .store import Store
-from .summarizer import Summarizer
+from .summarizer import Summarizer, Summary
 from .tools import LocalTools
 from .web import WebClient
 from .workspace import Workspace
@@ -77,7 +77,7 @@ class Agent:
         recall: Recall,
         web: WebClient | None = None,
         sandbox: Sandbox | None = None,
-    ):
+    ) -> None:
         self._llm = llm
         self._store = store
         self._config = config
@@ -130,7 +130,7 @@ class Agent:
         self._compactor.observe("assistant", reply)
         return reply
 
-    def _assistant_message(self, resp) -> dict:
+    def _assistant_message(self, resp: Response) -> dict:
         content: list[dict] = []
         if resp.text:
             content.append({"type": "text", "text": resp.text})
@@ -140,7 +140,7 @@ class Agent:
         )
         return {"role": "assistant", "content": content}
 
-    def _tool_results_message(self, tool_calls) -> dict:
+    def _tool_results_message(self, tool_calls: list[ToolCall]) -> dict:
         return {
             "role": "user",
             "content": [
@@ -216,7 +216,7 @@ class Agent:
         )
         self._recall.add_units(self._units_for(summary))
 
-    def _units_for(self, summary):
+    def _units_for(self, summary: Summary) -> list[Unit]:
         # Only the still-hot User Turns are indexed here; the ones compacted
         # away during the session were already handed to Recall by the
         # Compactor — so every User Turn is indexed exactly once (ADR-0004).

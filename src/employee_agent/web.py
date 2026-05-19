@@ -34,7 +34,7 @@ class AnthropicWebClient:
     tool (no extra vendor), fetch via stdlib urllib. Intentionally thin,
     untested glue — exercised only in production, faked in tests."""
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(self, api_key: str | None = None) -> None:
         from anthropic import Anthropic
 
         self._client = Anthropic(

@@ -24,6 +24,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Protocol
 
+from .config import Config
+
 
 @dataclass(frozen=True)
 class ExecResult:
@@ -62,7 +64,9 @@ class DockerSandbox:
     not be "optimised away" as if it were the security boundary.
     """
 
-    def __init__(self, workspace_root, config):
+    def __init__(
+        self, workspace_root: str | os.PathLike[str], config: Config
+    ) -> None:
         # The bind-mount source: canonicalised so the airlock the file tools
         # enforce on the host and the only path visible in the container are
         # the same directory.

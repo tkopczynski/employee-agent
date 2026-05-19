@@ -17,6 +17,7 @@ bound can be watched holding against a real model.
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from .config import Config
@@ -53,11 +54,11 @@ class Compactor:
         self,
         summarizer: SummarizerLike,
         config: Config,
-        conversation_id,
+        conversation_id: int,
         recall: RecallSink,
         *,
-        token_counter=None,
-    ):
+        token_counter: Callable[[str], int] | None = None,
+    ) -> None:
         self._summarizer = summarizer
         self._config = config
         self._conversation_id = conversation_id
@@ -124,7 +125,9 @@ class Compactor:
     def _hot_tokens(self) -> int:
         return sum(self._count(m["content"]) for m in self.hot_context())
 
-    def _over_budget(self, trigger, tail_budget, summary_slot) -> bool:
+    def _over_budget(
+        self, trigger: float, tail_budget: int, summary_slot: int
+    ) -> bool:
         tail_tokens = sum(self._count(c) for _r, c in self._tail)
         return tail_tokens > tail_budget or summary_slot + tail_tokens > trigger
 

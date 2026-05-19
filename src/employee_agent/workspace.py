@@ -17,7 +17,7 @@ class WorkspaceError(Exception):
 
 
 class Workspace:
-    def __init__(self, root):
+    def __init__(self, root: str | os.PathLike[str]) -> None:
         self._root = Path(os.path.realpath(root))
 
     @property

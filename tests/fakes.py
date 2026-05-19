@@ -18,11 +18,18 @@ class FakeLLMClient:
     every call as (messages, model, tools) so tests can assert which model was
     resolved and which tools were offered."""
 
-    def __init__(self, replies=None):
-        self._replies = list(replies or [])
+    def __init__(
+        self,
+        replies: list[str | ToolCall | list[ToolCall] | Response] | None = None,
+    ) -> None:
+        self._replies: list[str | ToolCall | list[ToolCall] | Response] = list(
+            replies or []
+        )
         self.calls = []  # list of (messages, model, tools) in call order
 
-    def complete(self, messages, model, *, tools=None):
+    def complete(
+        self, messages: list[dict], model: str, *, tools: list[dict] | None = None
+    ) -> Response:
         self.calls.append((messages, model, tools or []))
         if not self._replies:
             raise AssertionError("FakeLLMClient.complete called more times than scripted")

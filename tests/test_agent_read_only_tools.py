@@ -449,6 +449,47 @@ def test_write_then_run_command_routes_through_sandbox_and_grounds_the_reply(
     ]
 
 
+def test_web_tools_with_no_web_client_wired_are_clean_tool_errors(tmp_path):
+    # Same family as the no-Sandbox latent bug (ADR-0009): an Agent built
+    # without a WebClient still offers web_search/fetch_url; invoking them
+    # must be a clean tool-level *result*, not an AttributeError on a None
+    # seam that crashes the Turn. `web` defaults to None — the unwired state
+    # ty surfaced once LocalTools.web was honestly typed `WebClient | None`.
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    store = Store(tmp_path / "recall.sqlite")
+    cfg = Config(workspace={"root": str(ws)})
+    recall = Recall(store, TopicEmbedder(), cfg)
+    llm = FakeLLMClient(
+        replies=[
+            ToolCall(id="w1", name="web_search", input={"query": "anything"}),
+            ToolCall(id="f1", name="fetch_url", input={"url": "https://x"}),
+            "I can't browse the web — no web client is configured.",
+        ]
+    )
+    agent = Agent(llm=llm, store=store, config=cfg, recall=recall)  # web=None
+
+    reply = agent.send("look something up")
+
+    # The Turn completed: the model's post-tool text reaches the User and no
+    # exception escaped the loop across either web tool.
+    assert reply == "I can't browse the web — no web client is configured."
+    # Both tool results are clean, intentional errors — not a leaked Python
+    # AttributeError about NoneType.
+    for call in llm.calls:
+        blob = json.dumps(call[0])
+        assert "AttributeError" not in blob
+    followup_blob = json.dumps(llm.calls[-1][0])
+    assert "web_search unavailable" in followup_blob
+    assert "fetch_url unavailable" in followup_blob
+    # The Turn persisted cleanly: User input + the relayed explanation.
+    turns = store.turns_of(agent.conversation_id)
+    assert [(t.role, t.content) for t in turns] == [
+        ("user", "look something up"),
+        ("agent", "I can't browse the web — no web client is configured."),
+    ]
+
+
 def test_run_command_with_no_sandbox_wired_is_a_clean_tool_error(tmp_path):
     # An Agent constructed without a Sandbox still offers run_command; the
     # band-C contract says invoking it must be a clean tool-level *result*,

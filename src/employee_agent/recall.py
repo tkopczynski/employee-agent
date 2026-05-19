@@ -24,7 +24,7 @@ import sqlite_vec
 
 from .config import Config
 from .embedder import Embedder
-from .store import Store
+from .store import Store, Turn
 
 
 def _now_iso() -> str:
@@ -69,7 +69,9 @@ class RecallSink(Protocol):
 
 
 class Recall:
-    def __init__(self, store: Store, embedder: Embedder, config: Config):
+    def __init__(
+        self, store: Store, embedder: Embedder, config: Config
+    ) -> None:
         self._store = store
         self._embedder = embedder
         self._config = config
@@ -180,7 +182,12 @@ class Recall:
             ).fetchall()
         return self._fuse(keyword_rows, semantic_rows, k)
 
-    def _fuse(self, keyword_rows, semantic_rows, k: int) -> list[Hit]:
+    def _fuse(
+        self,
+        keyword_rows: list[sqlite3.Row],
+        semantic_rows: list[sqlite3.Row],
+        k: int,
+    ) -> list[Hit]:
         # Reciprocal Rank Fusion: a unit at 1-based rank r in a list scores
         # 1/(rrf_k + r) for that list; its fused score is the sum across the
         # lists it appears in. No normalisation, no per-arm weighting — a unit
@@ -224,7 +231,7 @@ class Recall:
                 break
         return hits
 
-    def get_conversation(self, conversation_id: int):
+    def get_conversation(self, conversation_id: int) -> list[Turn]:
         """Drill-in: the full ordered transcript (both roles) of a past
         Conversation, so bounded recall is not lossy. Only ever called with
         an id from a seal-gated `search` Hit, so no extra gate here."""
