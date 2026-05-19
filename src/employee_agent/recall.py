@@ -15,6 +15,7 @@ obeys ADR-0005 exactly like keyword.
 """
 
 import datetime as dt
+import re
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -29,6 +30,22 @@ from .store import Store, Turn
 
 def _now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def _fts5_match_query(query: str) -> str | None:
+    """Turn LLM/user free text into a safe FTS5 MATCH expression.
+
+    The query is ordinary phrasing, never an FTS5 expression: `AC/DC`,
+    `opening-quarter`, `notes: Q1` are all normal asks, but `/ - : * " ( )`
+    are FTS5 query syntax and crash MATCH unsanitised. We extract the
+    tokenisable word runs and quote each as an FTS5 string literal, joined by
+    spaces (implicit AND) so multi-word semantics match the old raw behaviour
+    for punctuation-free queries. Returns None when nothing is tokenisable
+    (caller skips the keyword arm rather than issuing an empty MATCH)."""
+    words = re.findall(r"\w+", query, re.UNICODE)
+    if not words:
+        return None
+    return " ".join(f'"{w}"' for w in words)
 
 
 def _est_tokens(text: str | None) -> int:
@@ -145,22 +162,25 @@ class Recall:
         if k is None:
             k = self._config.recall_k
         query_vec = self._embedder.embed([query])[0]
+        match = _fts5_match_query(query)
         with self._lock:
             n = self._conn.execute(
                 "SELECT count(*) FROM search_units"
             ).fetchone()[0]
-            keyword_rows = self._conn.execute(
-                """
-                SELECT su.id, su.conversation_id, c.started_at,
-                       c.summary_prose, su.text
-                FROM fts_search_units
-                JOIN search_units su ON su.id = fts_search_units.rowid
-                JOIN conversations c ON c.id = su.conversation_id
-                WHERE fts_search_units MATCH ? AND c.sealed_at IS NOT NULL
-                ORDER BY bm25(fts_search_units)
-                """,
-                (query,),
-            ).fetchall()
+            keyword_rows: list[sqlite3.Row] = []
+            if match is not None:
+                keyword_rows = self._conn.execute(
+                    """
+                    SELECT su.id, su.conversation_id, c.started_at,
+                           c.summary_prose, su.text
+                    FROM fts_search_units
+                    JOIN search_units su ON su.id = fts_search_units.rowid
+                    JOIN conversations c ON c.id = su.conversation_id
+                    WHERE fts_search_units MATCH ? AND c.sealed_at IS NOT NULL
+                    ORDER BY bm25(fts_search_units)
+                    """,
+                    (match,),
+                ).fetchall()
             # KNN must be a bare vec0 query, so rank all units by distance in a
             # CTE, then seal-gate via the join outside it.
             semantic_rows = self._conn.execute(

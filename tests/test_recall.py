@@ -151,6 +151,41 @@ def test_search_yields_one_ranked_hit_per_conversation(tmp_path):
     assert "kubernetes" in hits[0].snippet
 
 
+def test_search_query_with_fts5_metacharacters_does_not_crash(tmp_path):
+    # The query is LLM/user-chosen free text, not an FTS5 expression. A bare
+    # '/' '-' ':' etc. is ordinary phrasing, not query syntax — it must match
+    # the indexed tokens, never raise sqlite3.OperationalError.
+    recall, store = _recall(tmp_path)
+    conv_id = store.start_conversation()
+    store.add_turn(conv_id, 0, "user", "I went to the AC/DC concert last night")
+    store.seal_conversation(conv_id, "User talked about an AC/DC concert.", [])
+    recall.add_units(
+        [Unit(conv_id, "user_turn", "I went to the AC/DC concert last night")]
+    )
+
+    # The exact crash from the bug report: fts5 syntax error near "/".
+    hits = recall.search("AC/DC", k=6)
+    assert [h.conversation_id for h in hits] == [conv_id]
+    assert "AC/DC" in hits[0].snippet
+
+    # The hyphen case flagged as a latent prod bug — same contract.
+    assert [h.conversation_id for h in recall.search("AC-DC", k=6)] == [conv_id]
+
+
+def test_search_query_of_only_punctuation_does_not_crash(tmp_path):
+    # Degenerate: nothing tokenisable, so the keyword arm is skipped rather
+    # than issuing an empty MATCH (which fts5 also rejects). The semantic arm
+    # still runs — best-effort nearest-neighbour, as it does for any query —
+    # so the contract here is purely "does not raise".
+    recall, store = _recall(tmp_path)
+    conv_id = store.start_conversation()
+    store.seal_conversation(conv_id, "recap", [])
+    recall.add_units([Unit(conv_id, "user_turn", "ordinary content here")])
+
+    hits = recall.search("/ - : ;", k=6)
+    assert isinstance(hits, list)
+
+
 def test_k_caps_the_number_of_conversations_returned(tmp_path):
     recall, store = _recall(tmp_path)
     for _ in range(3):
