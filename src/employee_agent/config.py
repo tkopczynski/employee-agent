@@ -5,6 +5,8 @@ recall-quality-vs-cost trade-off be measured by swapping models per task. Model
 names are never hardcoded in the agent loop — they are resolved from here.
 """
 
+from typing import Any
+
 
 class Config:
     DEFAULT_MODELS = {
@@ -51,15 +53,28 @@ class Config:
         self,
         models: dict[str, str] | None = None,
         recall: dict[str, int] | None = None,
-        compaction: dict | None = None,
-        workspace: dict | None = None,
-        sandbox: dict | None = None,
-    ):
-        self._models = {**self.DEFAULT_MODELS, **(models or {})}
-        self._recall = {**self.DEFAULT_RECALL, **(recall or {})}
-        self._compaction = {**self.DEFAULT_COMPACTION, **(compaction or {})}
-        self._workspace = {**self.DEFAULT_WORKSPACE, **(workspace or {})}
-        self._sandbox = {**self.DEFAULT_SANDBOX, **(sandbox or {})}
+        compaction: dict[str, Any] | None = None,
+        workspace: dict[str, Any] | None = None,
+        sandbox: dict[str, Any] | None = None,
+    ) -> None:
+        # ADR-0009: the backing dicts are `dict[str, Any]`. The property
+        # facade below localizes this escape, so the `-> int/float/str`
+        # return annotations are deliberately unverified assertions — a
+        # future upgrade to typed config sections needs no caller changes.
+        self._models: dict[str, Any] = {**self.DEFAULT_MODELS, **(models or {})}
+        self._recall: dict[str, Any] = {**self.DEFAULT_RECALL, **(recall or {})}
+        self._compaction: dict[str, Any] = {
+            **self.DEFAULT_COMPACTION,
+            **(compaction or {}),
+        }
+        self._workspace: dict[str, Any] = {
+            **self.DEFAULT_WORKSPACE,
+            **(workspace or {}),
+        }
+        self._sandbox: dict[str, Any] = {
+            **self.DEFAULT_SANDBOX,
+            **(sandbox or {}),
+        }
 
     def model_for(self, task: str) -> str:
         return self._models[task]
