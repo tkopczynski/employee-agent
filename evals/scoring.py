@@ -10,7 +10,28 @@ Probe duck type: `.query: str`, `.arm: str`, `.expect: int`.
 Floor duck type: `.recall_at_k: float`, `.hit_at_1: float`.
 """
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from typing import Protocol
+
+
+# The duck types the docstring documents, formalized as co-located Protocols
+# (the house seam pattern): the loader's Probe/Floor dataclasses and the
+# test's stand-ins structurally satisfy these, so neither is imported here.
+class Probe(Protocol):
+    query: str
+    arm: str
+    expect: int
+
+
+class Floor(Protocol):
+    recall_at_k: float
+    hit_at_1: float
+
+
+# query -> ranked Conversation-id list (Recall.search in the runner, a canned
+# lambda in the test).
+Search = Callable[[str], list[int]]
 
 
 @dataclass(frozen=True)
@@ -39,7 +60,9 @@ class Scorecard:
     passed: bool
 
 
-def _metrics(probes, ranked, k) -> ArmMetrics:
+def _metrics(
+    probes: list[Probe], ranked: dict[str, list[int]], k: int
+) -> ArmMetrics:
     n = len(probes)
     if not n:
         return ArmMetrics(0.0, 0.0, 0.0, 0.0, 0.0)
@@ -58,7 +81,9 @@ def _metrics(probes, ranked, k) -> ArmMetrics:
     )
 
 
-def score(probes, search, k, floor) -> Scorecard:
+def score(
+    probes: Iterable[Probe], search: Search, k: int, floor: Floor
+) -> Scorecard:
     probes = list(probes)
     ranked = {p.query: search(p.query) for p in probes}
     arms = sorted({p.arm for p in probes})

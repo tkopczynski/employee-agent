@@ -9,6 +9,7 @@ Probe / Floor expose exactly the duck type `evals.scoring` expects
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import yaml
 
@@ -75,7 +76,7 @@ def _fraction(block: dict, key: str) -> float:
     return float(v)
 
 
-def load(path) -> Dataset:
+def load(path: str | Path) -> Dataset:
     """Parse and fully validate `path`. Raises `DatasetError` on any defect:
     a bad arm, an unknown expected id, a missing/out-of-range floor, duplicate
     or non-contiguous ids. The conversations come back sorted by id, which is

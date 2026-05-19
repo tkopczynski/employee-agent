@@ -18,7 +18,7 @@ from employee_agent.recall import Recall, Unit
 from employee_agent.store import Store
 
 from .loader import Conversation, Dataset, DatasetError, load
-from .scoring import Scorecard, score
+from .scoring import ArmMetrics, Scorecard, score
 
 # Pinned + echoed so a saved scorecard is self-describing (ADR-0002, PRD US-17).
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"
@@ -57,7 +57,7 @@ def _build_corpus(dataset: Dataset, store: Store, recall: Recall) -> None:
         recall.add_units(_units_for(conv))
 
 
-def _fmt_metrics(label, m, n):
+def _fmt_metrics(label: str, m: ArmMetrics, n: int) -> str:
     return (
         f"  {label:<10} n={n:<3} "
         f"recall@1={m.recall_at_1:.2f} recall@3={m.recall_at_3:.2f} "
@@ -107,7 +107,7 @@ def _print_scorecard(card: Scorecard, dataset: Dataset, config: Config) -> None:
     print("=" * 78)
 
 
-def run(dataset_path) -> int:
+def run(dataset_path: str | Path) -> int:
     """Load → build → search → score → print → exit code (0 PASS, 1 FAIL).
     A `DatasetError` propagates to the entry point, which maps it to exit 1."""
     dataset = load(dataset_path)
