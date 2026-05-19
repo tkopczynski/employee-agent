@@ -91,7 +91,9 @@ def test_long_session_stays_bounded_then_seals_and_is_recallable(tmp_path):
     # Sealing closes the Conversation and writes the final Summary.
     past_id = agent.conversation_id
     agent.seal()
-    assert store.get_conversation(past_id).sealed_at is not None
+    sealed = store.get_conversation(past_id)
+    assert sealed is not None
+    assert sealed.sealed_at is not None
 
     # A fresh launch recalls the Turn that was compacted away mid-session:
     # compaction -> incremental index -> Seal flips searchability -> recall.

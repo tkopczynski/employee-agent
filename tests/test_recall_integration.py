@@ -69,7 +69,9 @@ def test_fresh_launch_recalls_a_prior_sealed_conversation_with_its_date(tmp_path
     recall = Recall(store, TopicEmbedder(), Config())
 
     past_id = _sealed_session(store, recall)
-    past_date = store.get_conversation(past_id).started_at[:10]
+    past_conv = store.get_conversation(past_id)
+    assert past_conv is not None
+    past_date = past_conv.started_at[:10]
 
     # A fresh launch — a new Conversation, recall is cross-session (ADR-0005).
     s2 = FakeLLMClient(
@@ -107,7 +109,9 @@ def test_search_recall_result_frames_hits_as_dated_past_sessions(tmp_path):
     store = Store(tmp_path / "recall.sqlite")
     recall = Recall(store, TopicEmbedder(), Config())
     past_id = _sealed_session(store, recall)
-    past_date = store.get_conversation(past_id).started_at[:10]
+    past_conv = store.get_conversation(past_id)
+    assert past_conv is not None
+    past_date = past_conv.started_at[:10]
 
     s2 = FakeLLMClient(
         replies=[
