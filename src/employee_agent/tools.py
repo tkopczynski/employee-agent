@@ -197,6 +197,13 @@ class LocalTools:
         return f"wrote {path}"
 
     def _run_command(self, command: str) -> str:
+        # No Sandbox wired: run_command is still offered, but calling .run on
+        # the None seam would be an AttributeError leaking out as the tool
+        # result. Return a clean, intentional tool-level error instead — the
+        # band-C "a refusal is an ordinary result, not a crashed Turn"
+        # contract (ADR-0007), and what makes the optional-seam type honest.
+        if self._sandbox is None:
+            return "run_command unavailable: no Sandbox is configured for this Agent"
         # Execution is a cost/time surface (ADR-0007, PRD Observability): time
         # the command's wall clock and log its duration + exit status, the
         # same structured cost log as Compaction. The Sandbox itself enforces

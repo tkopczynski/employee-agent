@@ -449,6 +449,42 @@ def test_write_then_run_command_routes_through_sandbox_and_grounds_the_reply(
     ]
 
 
+def test_run_command_with_no_sandbox_wired_is_a_clean_tool_error(tmp_path):
+    # An Agent constructed without a Sandbox still offers run_command; the
+    # band-C contract says invoking it must be a clean tool-level *result*,
+    # not an AttributeError on a None seam that leaks out as the tool result
+    # and corrupts the Turn. The Turn must complete normally (latent bug 3,
+    # ADR-0009) — sandbox defaults to None here, exactly the unwired state.
+    agent, store, llm, _ws = _make_agent(
+        tmp_path,
+        replies=[
+            ToolCall(
+                id="r1",
+                name="run_command",
+                input={"command": "python3 sum.py"},
+            ),
+            "I can't run commands — no execution sandbox is configured.",
+        ],
+    )
+
+    reply = agent.send("run sum.py")
+
+    # The Turn completed: the model's post-tool text reaches the User, no
+    # exception escaped the loop.
+    assert reply == "I can't run commands — no execution sandbox is configured."
+    followup_blob = json.dumps(llm.calls[1][0])
+    # The tool result is a clean, intentional error — not a leaked Python
+    # AttributeError about NoneType.
+    assert "AttributeError" not in followup_blob
+    assert "run_command unavailable" in followup_blob
+    # The Turn persisted cleanly: User input + the relayed explanation.
+    turns = store.turns_of(agent.conversation_id)
+    assert [(t.role, t.content) for t in turns] == [
+        ("user", "run sum.py"),
+        ("agent", "I can't run commands — no execution sandbox is configured."),
+    ]
+
+
 def test_run_command_nonzero_exit_is_relayed_not_a_crashed_turn(tmp_path):
     # Band-C error contract, the same as a failing web fetch: a command that
     # exits non-zero is a *result* the Agent reads and relays, not an
