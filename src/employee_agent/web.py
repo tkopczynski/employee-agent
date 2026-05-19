@@ -42,6 +42,8 @@ class AnthropicWebClient:
         )
 
     def search(self, query: str) -> list[SearchResult]:
+        from anthropic.types import WebSearchToolResultBlock
+
         resp = self._client.messages.create(
             model="claude-haiku-4-5",
             max_tokens=1024,
@@ -50,16 +52,23 @@ class AnthropicWebClient:
         )
         results: list[SearchResult] = []
         for block in resp.content:
-            if getattr(block, "type", None) != "web_search_tool_result":
-                continue
-            for item in block.content:
-                results.append(
-                    SearchResult(
-                        title=getattr(item, "title", "") or "",
-                        url=getattr(item, "url", "") or "",
-                        snippet=getattr(item, "encrypted_content", "") or "",
+            # Narrow on the concrete Anthropic block class — the inbound
+            # vendor edge, type-checked with no suppression. (ty 0.0.37 does
+            # not narrow this 15-member union on the `.type` literal
+            # discriminant; isinstance on the block class is the tool-supported
+            # equivalent of the LLMClient adapter's `b.type == "..."`.) The
+            # second isinstance narrows `.content` off its error arm.
+            if isinstance(block, WebSearchToolResultBlock) and isinstance(
+                block.content, list
+            ):
+                for item in block.content:
+                    results.append(
+                        SearchResult(
+                            title=item.title,
+                            url=item.url,
+                            snippet=item.encrypted_content,
+                        )
                     )
-                )
         return results
 
     def fetch(self, url: str) -> str:
