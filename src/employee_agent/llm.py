@@ -40,7 +40,13 @@ class AnthropicLLMClient:
     def complete(
         self, messages: list[dict], model: str, *, tools: list[dict] | None = None
     ) -> Response:
-        resp = self._client.messages.create(
+        # The LLMClient seam's contract (module docstring) is that no
+        # Anthropic types leak into it: inbound `messages` stays `list[dict]`,
+        # not `Iterable[MessageParam]`, which deliberately fails the SDK's
+        # overload resolution. ADR-0009 sanctions one localized suppression
+        # here rather than leaking vendor types across the seam — the lone
+        # type-checker suppression in the entire repo.
+        resp = self._client.messages.create(  # ty: ignore[no-matching-overload]
             model=model,
             max_tokens=1024,
             messages=messages,
