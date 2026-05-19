@@ -76,7 +76,17 @@ class Store:
                 "INSERT INTO conversations (started_at) VALUES (?)", (_now_iso(),)
             )
             self._conn.commit()
-            return cur.lastrowid
+            rowid = cur.lastrowid
+            if rowid is None:
+                # Impossible under AUTOINCREMENT, but the cursor types it as
+                # int | None: a started Conversation with no id is
+                # unrecoverable, so fail loudly rather than leak None under
+                # the -> int contract (ADR-0009).
+                raise RuntimeError(
+                    "start_conversation: INSERT produced no lastrowid; "
+                    "the Conversation has no id and is unrecoverable"
+                )
+            return rowid
 
     def get_conversation(self, conversation_id: int) -> Conversation | None:
         with self._lock:
